@@ -1,0 +1,6 @@
+# PlatformIO 构建产物
+.pio/
+
+# IDE / 工具链生成的本机文件
+.vscode/
+compile_commands.json
