@@ -66,10 +66,13 @@ function retry(){clearTimeout(tmr);tmr=setTimeout(connect,2000);}
 function connect(){
   clearTimeout(tmr);
   try{ws=new WebSocket('ws://'+location.host+'/ws');}catch(e){retry();return;}
-  ws.onopen=()=>{$('conn').classList.add('on');};
+  ws.onopen=()=>{$('conn').classList.add('on');$('meta').textContent='已连接, 等待数据...';};
   ws.onclose=()=>{$('conn').classList.remove('on');retry();};
   ws.onerror=()=>{try{ws.close();}catch(e){}};
-  ws.onmessage=ev=>{render(JSON.parse(ev.data));};
+  ws.onmessage=ev=>{
+    try{render(JSON.parse(ev.data));}
+    catch(e){console.error('bad json:',String(ev.data).slice(0,120),e);}
+  };
 }
 connect();
 

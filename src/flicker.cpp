@@ -171,6 +171,9 @@ void flickerReport(uint32_t overflow)
         freq = FFT.majorPeak();
         FFT.setArrays(vReal, vImag, FFT_SIZE);
     }
+    // 纯噪声/无信号时插值可能得到 NaN (log(0) 谱线), 归零保护
+    if (isnan(freq) || freq < 0.0f)
+        freq = 0.0f;
 
     // Pst^LM (IEC TR 61547-1 谱估计): Pst = sqrt(Σ (m_k·H(f_k))²)
     // m_k = 2·|X_k|/|X_0| (Hann 窗归一化的相对调制幅度), H 为人眼加权曲线
