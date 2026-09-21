@@ -97,6 +97,8 @@ static uint8_t gb40070Zone(float f, float m)
 }
 ```
 
+- **WiFi 网页仪表**（src/webdash.*）：S3 开 AP 热点 `LightSense`（密码 `lightsense`），浏览器访问
+  `http://192.168.4.1`，WebSocket 每报告窗口推送 JSON 快照（波形包络 / 频谱 / 指标）实时刷新。
 - **串口输出示例**：
 
 ```

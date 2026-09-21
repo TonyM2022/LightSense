@@ -17,6 +17,9 @@
                        Pst = sqrt(Σ (m_k·H(f_k))²), m_k=2|X_k|/|X_0| (Hann 归一化),
                        H 为 IEC 61000-4-15 人眼加权曲线 (8.8Hz 处归一化为 1)
                        注意: 受 4.88Hz 频率分辨率限制, <15Hz 频段精度有限
+  4. WiFi 网页仪表 (webdash 层):
+      - S3 开 AP 热点 (SSID 见 config.h), 浏览器访问 http://192.168.4.1
+      - WebSocket 每报告窗口推送 JSON 快照: 波形包络 / 频谱 / 指标
 
   说明:
   - GPIO1 = ADC1_CH0, 12bit (0~4095), 11dB 衰减 (量程约 0~3.1V)
@@ -26,7 +29,8 @@
   分层:
   - config.h   : 全局配置
   - adc_dma.*  : 驱动层 (ADC DMA 初始化, 整块读取, TYPE2 帧解析, 诊断)
-  - flicker.*  : 度量层 (窗口统计, FFT, 指标计算, 报告输出)
+  - flicker.*  : 度量层 (窗口统计, FFT, 指标计算, 报告输出, 网页快照)
+  - webdash.*  : 网页层 (AP 热点, Web 服务器, WebSocket JSON 推送)
   - main.cpp   : 编排 (setup/loop)
 */
 
@@ -34,6 +38,7 @@
 #include "config.h"
 #include "adc_dma.h"
 #include "flicker.h"
+#include "webdash.h"
 
 static float blockBuf[FFT_SIZE];      // 整块样本缓冲 (16KB)
 static uint32_t blockIndex = 0;       // 已处理块计数
@@ -62,13 +67,19 @@ void setup()
 
     flickerResetWindow();
 
+    // WiFi 网页仪表 (失败仅告警, 串口功能不受影响)
+    if (!webdashBegin())
+    {
+        Serial.println("WARN: WiFi web dashboard start failed.");
+    }
+
     if (!adcDmaBegin())
     {
         while (true) delay(1000);     // 初始化失败, 停机
     }
 }
 
-// ---------------- 主循环: 取块 → 处理 → 定期报告 ----------------
+// ---------------- 主循环: 取块 → 处理 → 定期报告/推送 ----------------
 void loop()
 {
     if (!adcDmaReadBlock(blockBuf))
@@ -81,5 +92,6 @@ void loop()
     if (++blockIndex % BLOCKS_PER_REPORT == 0)
     {
         flickerReport(adcDmaTakeOverflow());
+        webdashBroadcast(flickerSnapshot());   // 推送到浏览器
     }
 }

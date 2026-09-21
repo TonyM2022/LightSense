@@ -11,3 +11,9 @@
 #define BLOCKS_PER_REPORT    5                    // 5 块 ≈ 1.024 s 输出一次
 #define FFT_BIN_HZ           ((float)SAMPLE_RATE_HZ / (float)FFT_SIZE)
 #define PST_BIN_MAX          7                    // Pst 求和上限 bin (34.2 Hz, 加权表至 35 Hz)
+
+// ---------------- WiFi 网页仪表 ----------------
+#define WIFI_AP_SSID         "LightSense"         // AP 热点名
+#define WIFI_AP_PASS         "lightsense"         // AP 密码 (至少 8 位)
+#define WEB_WAVE_POINTS      256                  // 波形包络段数 (每段 16 点取 min/max)
+#define WEB_SPEC_POINTS      256                  // 频谱显示点数 (窗口平均后 max-pool)

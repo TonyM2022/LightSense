@@ -4,6 +4,7 @@
 //   Flicker Index: 均值以上面积/总面积 (IEEE 1789, 时域)
 //   Pst (LM)     : IEC TR 61547-1 谱估计 Pst = sqrt(Σ (m_k·H(f_k))²)
 //   Freq / Zone  : FFT 主频 + GB 40070-2021 波动深度合规判定
+// 网页快照: 每个报告窗口填充最新波形包络/平均频谱/指标, 供 webdash 层推送
 #include <Arduino.h>
 #include <arduinoFFT.h>
 #include "config.h"
@@ -21,6 +22,15 @@ static uint16_t winMin = 4095;                             // 窗口内最小值
 static uint32_t winSum = 0;                                // 窗口内总和
 static uint32_t winCount = 0;                              // 窗口内样本数
 static float winAboveMean = 0.0f;                          // 均值以上面积和 (Flicker Index)
+static uint8_t winBlocks = 0;                              // 窗口内已处理块数 (频谱平均)
+
+// 末块波形包络: 每 WAVE_SEG 点取 min/max (4096 点 → WEB_WAVE_POINTS 段)
+#define WAVE_SEG (FFT_SIZE / WEB_WAVE_POINTS)
+static float lastWmin[WEB_WAVE_POINTS];
+static float lastWmax[WEB_WAVE_POINTS];
+
+// 网页快照 (flickerReport 填充)
+static FlickerSnapshot snap;
 
 // ---------------- IEC 61000-4-15 人眼闪烁加权 ----------------
 // 锚点: Table 2 正弦调制 Pst=1 可见阈值 ΔV/V (%) → H(f) = 0.25 / thr(f), 8.8Hz 处 H=1
@@ -75,24 +85,40 @@ void flickerResetWindow(void)
     winSum = 0;
     winCount = 0;
     winAboveMean = 0.0f;
+    winBlocks = 0;
     for (uint32_t k = 0; k <= FFT_SIZE / 2; k++)
         specAccum[k] = 0.0f;
 }
 
 void flickerProcessBlock(const float *samples)
 {
-    // 1. 时域统计
+    // 1. 时域统计 + 波形包络降采样 (每 WAVE_SEG 点取 min/max)
     uint32_t sum = 0;
     uint16_t bMax = 0;
     uint16_t bMin = 4095;
+    uint16_t segMin = 4095;
+    uint16_t segMax = 0;
+    uint32_t seg = 0;
     for (uint32_t i = 0; i < FFT_SIZE; i++)
     {
         uint16_t v = (uint16_t)samples[i];
         if (v > bMax) bMax = v;
         if (v < bMin) bMin = v;
+        if (v > segMax) segMax = v;
+        if (v < segMin) segMin = v;
         sum += v;
         vReal[i] = (float)v;
+
+        if ((i % WAVE_SEG) == WAVE_SEG - 1)      // 段末: 保存包络点
+        {
+            lastWmin[seg] = (float)segMin;
+            lastWmax[seg] = (float)segMax;
+            seg++;
+            segMin = 4095;
+            segMax = 0;
+        }
     }
+    winBlocks++;
 
     if (bMax > winMax) winMax = bMax;
     if (bMin < winMin) winMin = bMin;
@@ -190,14 +216,16 @@ void flickerReport(uint32_t overflow)
     Serial.println(" Hz");
 
     // GB 40070-2021 波动深度合规判定 (基于主频 + 整体波动深度)
+    snap.noisePass = (flickerPercent < 1.0f) ? 1 : 0;
+    snap.zone = snap.noisePass ? 0 : gb40070Zone(freq, flickerPercent);
     const char *zoneStr;
-    if (flickerPercent < 1.0f)
+    if (snap.noisePass)
     {
         zoneStr = "PASS (<1%)";
     }
     else
     {
-        switch (gb40070Zone(freq, flickerPercent))
+        switch (snap.zone)
         {
             case 0:  zoneStr = "PASS";   break;
             case 1:  zoneStr = "FAIL";   break;
@@ -216,5 +244,42 @@ void flickerReport(uint32_t overflow)
     Serial.println("------------------");
     Serial.println();
 
+    // 填充网页快照 (重置窗口前完成)
+    snap.seq++;
+    snap.samples = winCount;
+    snap.overflow = overflow;
+    snap.vmax = winMax;
+    snap.vmin = winMin;
+    snap.vavg = (float)winSum / (float)winCount;
+    snap.flickerPercent = flickerPercent;
+    snap.flickerIndex = flickerIndex;
+    snap.pstLM = pstLM;
+    snap.freqHz = freq;
+    for (uint32_t g = 0; g < WEB_WAVE_POINTS; g++)
+    {
+        snap.wmin[g] = lastWmin[g];
+        snap.wmax[g] = lastWmax[g];
+    }
+    // 频谱: 窗口平均后按组 max-pool 降采样 (跳过 DC bin 0)
+    uint8_t nb = (winBlocks > 0) ? winBlocks : 1;
+    for (uint32_t g = 0; g < WEB_SPEC_POINTS; g++)
+    {
+        float m = 0.0f;
+        for (uint32_t b = 0; b < (FFT_SIZE / 2) / WEB_SPEC_POINTS; b++)
+        {
+            uint32_t k = 1 + g * ((FFT_SIZE / 2) / WEB_SPEC_POINTS) + b;
+            if (k > FFT_SIZE / 2)
+                break;
+            float a = specAccum[k] / (float)nb;
+            if (a > m) m = a;
+        }
+        snap.spec[g] = m;
+    }
+
     flickerResetWindow();
+}
+
+const FlickerSnapshot *flickerSnapshot(void)
+{
+    return &snap;
 }
