@@ -7,9 +7,12 @@
       - 缓存   : 4096 点/块
   2. FFT 频谱分析 (arduinoFFT 库, 4096 点, Hann 窗, 去直流, 峰值插值提频)
   3. 串口输出统计 (每 5 块 ≈ 1.024 s 一次):
-      Samples / Max / Min / Average / Flicker % / Flicker Index / Pst(LM) / Flicker Frequency
-      - Flicker %    : 相对峰谷幅度 (IEEE 1789 Percent Flicker)
+      Samples / Max / Min / Average / Flicker % / Flicker Index / Pst(LM) / Flicker Frequency / Zone
+      - Flicker %    : 相对峰谷幅度 (IEEE 1789 Percent Flicker = 国标波动深度)
       - Flicker Index: 均值以上面积/总面积 (IEEE 1789, 时域)
+      - Zone         : GB 40070-2021 波动深度合规判定
+                       限值: 0.1% (f<=10) | 0.01f (10~90) | 0.032f (90~3125) | 豁免 (>3125)
+                       结果: PASS=合规 FAIL=超标 EXEMPT=高频豁免; m<1% 视为噪声直接 PASS
       - Pst (LM)     : IEC TR 61547-1 短时闪烁严重度谱估计
                        Pst = sqrt(Σ (m_k·H(f_k))²), m_k=2|X_k|/|X_0| (Hann 归一化),
                        H 为 IEC 61000-4-15 人眼加权曲线 (8.8Hz 处归一化为 1)
@@ -132,6 +135,24 @@ static float flickerWeight(float f)
     return 0.0f;
 }
 
+// ---------------- GB 40070-2021 波动深度合规判定 ----------------
+// 输入: f = 主频 (Hz), m = 波动深度/Percent Flicker (%)
+// 限值 (表4): 0.1% (f<=10) | 0.01f (10~90) | 0.032f (90~3125) | >3125 免除考核
+// 返回: 0=合规 1=超标 2=高频豁免
+static uint8_t gb40070Zone(float f, float m)
+{
+    if (f > 3125.0f)
+        return 2;
+
+    float limit = (f <= 10.0f)  ? 0.1f
+                : (f <= 90.0f)  ? 0.01f  * f
+                :                 0.032f * f;
+    if (m <= limit)
+        return 0;
+
+    return 1;
+}
+
 // ---------------- 输出统计报告 ----------------
 static void reportWindow(void)
 {
@@ -198,6 +219,24 @@ static void reportWindow(void)
     Serial.print("Freq     : ");
     Serial.print(freq, 2);
     Serial.println(" Hz");
+
+    // GB 40070-2021 波动深度合规判定 (基于主频 + 整体波动深度)
+    const char *zoneStr;
+    if (flickerPercent < 1.0f)
+    {
+        zoneStr = "PASS (<1%)";
+    }
+    else
+    {
+        switch (gb40070Zone(freq, flickerPercent))
+        {
+            case 0:  zoneStr = "PASS";   break;
+            case 1:  zoneStr = "FAIL";   break;
+            default: zoneStr = "EXEMPT"; break;
+        }
+    }
+    Serial.print("Zone     : GB40070 ");
+    Serial.println(zoneStr);
 
     if (overflowCnt > 0)
     {
