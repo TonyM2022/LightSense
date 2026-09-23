@@ -19,7 +19,16 @@
                        注意: 受 4.88Hz 频率分辨率限制, <15Hz 频段精度有限
   4. WiFi 网页仪表 (webdash 层):
       - S3 开 AP 热点 (SSID 见 config.h), 浏览器访问 http://192.168.4.1
-      - WebSocket 每报告窗口推送 JSON 快照: 波形包络 / 频谱 / 指标
+      - 三页面按钮切换: 频闪仪 / LED 控制 / 教室测量
+      - WebSocket 每报告窗口推送 JSON 快照: 波形包络 / 频谱 / 指标 / 教室测量进度
+  5. LED 闪烁频率控制 (led_pwm 层, D8 = GPIO21):
+      - LEDC 硬件 PWM: 常亮 / 50Hz / 100Hz / 500Hz / 1kHz / 5kHz, 占空比 50%
+      - 网页 LED 控制页切换, 与测量互不干扰 (可照射自测)
+  6. 教室灯光测量 (classroom 层):
+      - 多灯具依次测量, 每次固定 29 窗口 ≈ 30s, 可打标签
+      - 聚合: 波动深度均值/峰值, Flicker Index, Pst^LM 均值/峰值, 主频
+      - 判定: 波动深度均值 vs GB 40070 表4 限值 + Pst^LM 均值 ≤ 1
+      - 记录 NVS 持久化, 网页可导出 CSV
 
   说明:
   - GPIO1 = ADC1_CH0, 12bit (0~4095), 11dB 衰减 (量程约 0~3.1V)
@@ -29,15 +38,19 @@
   分层:
   - config.h   : 全局配置
   - adc_dma.*  : 驱动层 (ADC DMA 初始化, 整块读取, TYPE2 帧解析, 诊断)
+  - led_pwm.*  : 驱动层 (LEDC PWM 输出, 模式切换)
   - flicker.*  : 度量层 (窗口统计, FFT, 指标计算, 报告输出, 网页快照)
-  - webdash.*  : 网页层 (AP 热点, Web 服务器, WebSocket JSON 推送)
+  - classroom.*: 度量层扩展 (教室多灯具 30s 测量, GB 判定, NVS 记录)
+  - webdash.*  : 网页层 (AP 热点, Web 服务器, WebSocket JSON 推送, 控制路由)
   - main.cpp   : 编排 (setup/loop)
 */
 
 #include <Arduino.h>
 #include "config.h"
 #include "adc_dma.h"
+#include "led_pwm.h"
 #include "flicker.h"
+#include "classroom.h"
 #include "webdash.h"
 
 static float blockBuf[FFT_SIZE];      // 整块样本缓冲 (16KB)
@@ -67,6 +80,10 @@ void setup()
 
     flickerResetWindow();
 
+    ledPwmBegin();                        // LED PWM 输出 (默认常亮, 网页可切换)
+
+    classroomBegin();                     // 教室测量: 加载 NVS 历史记录
+
     // WiFi 网页仪表 (失败仅告警, 串口功能不受影响)
     if (!webdashBegin())
     {
@@ -92,6 +109,9 @@ void loop()
     if (++blockIndex % BLOCKS_PER_REPORT == 0)
     {
         flickerReport(adcDmaTakeOverflow());
-        webdashBroadcast(flickerSnapshot());   // 推送到浏览器
+
+        const FlickerSnapshot *snap = flickerSnapshot();
+        classroomOnWindow(snap);          // 教室测量: 逐窗口累加
+        webdashBroadcast(snap);           // 推送到浏览器
     }
 }
