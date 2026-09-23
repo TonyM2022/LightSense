@@ -31,29 +31,6 @@ static char runLabel[32];
 static bool resultPending = false;
 static ClassroomRecord lastResult;
 
-// ---------------- GB 40070-2021 判定 ----------------
-// 限值 (表4): 0.1% (f<=10) | 0.01f (10~90) | 0.032f (90~3125) | >3125 免除
-// 波动深度均值 + Pst^LM 均值 (≤1) 双指标
-static uint8_t judge(float freq, float mMean, float pstMean)
-{
-    if (mMean < 1.0f)
-        return CLS_PASS;                // 噪声门限
-
-    bool pstOK = (pstMean <= 1.0f);
-    if (freq > 3125.0f)
-        return pstOK ? CLS_EXEMPT : CLS_FAIL_PST;
-
-    float limit = (freq <= 10.0f)  ? 0.1f
-                : (freq <= 90.0f)  ? 0.01f  * freq
-                :                    0.032f * freq;
-    bool mOK = (mMean <= limit);
-
-    if (mOK && pstOK)   return CLS_PASS;
-    if (!mOK && pstOK)  return CLS_FAIL_M;
-    if (mOK && !pstOK)  return CLS_FAIL_PST;
-    return CLS_FAIL_BOTH;
-}
-
 // ---------------- NVS ----------------
 static void nvsSaveRecord(uint16_t idx)
 {
@@ -159,7 +136,7 @@ bool classroomOnWindow(const FlickerSnapshot *s)
     r.pstMean = accPst / (float)CLS_WINDOWS;
     r.pstMax  = accPstMax;
     r.freq    = bestFreq;
-    r.verdict = judge(r.freq, r.mMean, r.pstMean);
+    r.verdict = flickerVerdict(r.freq, r.mMean, r.pstMean);
 
     recs[recCount++] = r;
     nvsSaveRecord(recCount - 1);

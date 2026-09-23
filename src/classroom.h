@@ -9,13 +9,6 @@
 #define CLS_MAX_RECORDS     50   // NVS 最大记录数 (满后需导出 CSV 并清空)
 #define CLS_WINDOWS         29   // 单次测量窗口数 (29 × 1.024s ≈ 29.7s)
 
-// 判定码
-#define CLS_PASS            0    // 合规 (含波动深度 <1% 的噪声)
-#define CLS_FAIL_M          1    // 超标: 波动深度
-#define CLS_FAIL_PST        2    // 超标: Pst^LM > 1
-#define CLS_FAIL_BOTH       3    // 超标: 波动深度 + Pst^LM
-#define CLS_EXEMPT          4    // 高频豁免 (>3125 Hz)
-
 typedef struct {
     uint32_t ts;                 // 测量时刻 (开机秒数)
     char     label[32];          // 灯具标签 (UTF-8)
@@ -25,7 +18,7 @@ typedef struct {
     float    pstMean;            // Pst^LM 均值 (判定用)
     float    pstMax;             // Pst^LM 峰值 (展示用)
     float    freq;               // 主频 Hz (取频谱能量最大窗口)
-    uint8_t  verdict;            // CLS_*
+    uint8_t  verdict;            // FV_* 综合判定码 (flicker.h, 与频闪仪页一致)
 } ClassroomRecord;
 
 // 初始化: 从 NVS 加载历史记录

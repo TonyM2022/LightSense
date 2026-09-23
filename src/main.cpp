@@ -10,9 +10,10 @@
       Samples / Max / Min / Average / Flicker % / Flicker Index / Pst(LM) / Flicker Frequency / Zone
       - Flicker %    : 相对峰谷幅度 (IEEE 1789 Percent Flicker = 国标波动深度)
       - Flicker Index: 均值以上面积/总面积 (IEEE 1789, 时域)
-      - Zone         : GB 40070-2021 波动深度合规判定
+      - Zone         : 综合判定 (GB 40070-2021 波动深度 + Pst^LM ≤ 1, 与教室测量同口径)
                        限值: 0.1% (f<=10) | 0.01f (10~90) | 0.032f (90~3125) | 豁免 (>3125)
-                       结果: PASS=合规 FAIL=超标 EXEMPT=高频豁免; m<1% 视为噪声直接 PASS
+                       结果: PASS=合规 FAIL-M=波动深度超标 FAIL-PST=Pst超标
+                             FAIL-BOTH=双项超标 EXEMPT=高频豁免; m<1% 视为噪声直接 PASS
       - Pst (LM)     : IEC TR 61547-1 短时闪烁严重度谱估计
                        Pst = sqrt(Σ (m_k·H(f_k))²), m_k=2|X_k|/|X_0| (Hann 归一化),
                        H 为 IEC 61000-4-15 人眼加权曲线 (8.8Hz 处归一化为 1)
@@ -22,7 +23,7 @@
       - 三页面按钮切换: 频闪仪 / LED 控制 / 教室测量
       - WebSocket 每报告窗口推送 JSON 快照: 波形包络 / 频谱 / 指标 / 教室测量进度
   5. LED 闪烁频率控制 (led_pwm 层, D8 = GPIO21):
-      - LEDC 硬件 PWM: 常亮 / 50Hz / 100Hz / 500Hz / 1kHz / 5kHz, 占空比 50%
+      - LEDC 硬件 PWM: 常灭 / 常亮 / 50Hz / 100Hz / 500Hz / 1kHz / 5kHz, 闪烁模式占空比 50%
       - 网页 LED 控制页切换, 与测量互不干扰 (可照射自测)
   6. 教室灯光测量 (classroom 层):
       - 多灯具依次测量, 每次固定 29 窗口 ≈ 30s, 可打标签

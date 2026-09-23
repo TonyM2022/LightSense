@@ -2,7 +2,7 @@
 // AP 热点 (config.h 配置 SSID/密码) + 异步 Web 服务器:
 //   GET /     → 内嵌网页 (PROGMEM, 三页面: 频闪仪仪表 / LED 控制 / 教室测量)
 //   WS  /ws   → 每报告窗口广播一次 JSON 快照 (指标 + 波形包络 + 频谱 + 教室进度)
-//   GET /led  → 查询/设置 LED 输出模式 (?mode=const|50hz|100hz|500hz|1khz|5khz)
+//   GET /led  → 查询/设置 LED 输出模式 (?mode=const|50hz|100hz|500hz|1khz|5khz|off)
 //   GET  /api/classroom        → 教室测量状态 + 记录列表
 //   POST /api/classroom/start  → 开始一次 30s 测量 (?label=灯具标签)
 //   POST /api/classroom/clear  → 清空记录
@@ -77,10 +77,10 @@ canvas{width:100%;height:180px;display:block}
   <div class="card"><div class="label">Flicker Index</div><div class="value"><span id="fi">--</span></div></div>
   <div class="card"><div class="label">Pst<sup>LM</sup></div><div class="value"><span id="pst">--</span></div></div>
   <div class="card"><div class="label">主频</div><div class="value"><span id="freq">--</span><small>Hz</small></div></div>
-  <div class="card"><div class="label">GB 40070-2021 判定</div><div class="value" id="zone">--</div></div>
+  <div class="card"><div class="label">综合判定 (GB + Pst^LM)</div><div class="value" id="zone">--</div></div>
 </div>
 <div class="card wide"><div class="label">时域波形 (末块包络, 204.8 ms, ADC 码)</div><canvas id="wave"></canvas></div>
-<div class="card wide"><div class="label">频谱 (窗口平均, 0~10 kHz)</div><canvas id="spec"></canvas></div>
+<div class="card wide"><div class="label">频谱 (窗口平均, 对数轴 4.9 Hz ~ 5 kHz)</div><canvas id="spec"></canvas></div>
 <div class="card wide">
   <div class="label">ADC 码值 (窗口统计)</div>
   <div class="cards" style="margin:0">
@@ -93,7 +93,7 @@ canvas{width:100%;height:180px;display:block}
 </section>
 <section id="pg-led" style="display:none">
   <div class="card wide">
-    <div class="label">LED 输出模式 (D8 = GPIO21, 闪烁模式占空比 50%, 常亮 100%)</div>
+    <div class="label">LED 输出模式 (D8 = GPIO21, 闪烁模式占空比 50%, 常亮 100%, 常灭 0%)</div>
     <div class="btns" id="ledbtns"></div>
     <div class="meta" id="ledmeta" style="margin-top:8px">--</div>
   </div>
@@ -151,7 +151,7 @@ function showPage(p){
 }
 
 // ---------------- LED 模式控制 ----------------
-const MODES=[{p:'const',n:'常亮',f:0},{p:'50hz',n:'50 Hz',f:50},{p:'100hz',n:'100 Hz',f:100},{p:'500hz',n:'500 Hz',f:500},{p:'1khz',n:'1 kHz',f:1000},{p:'5khz',n:'5 kHz',f:5000}];
+const MODES=[{p:'off',n:'常灭',f:0},{p:'const',n:'常亮',f:0},{p:'50hz',n:'50 Hz',f:50},{p:'100hz',n:'100 Hz',f:100},{p:'500hz',n:'500 Hz',f:500},{p:'1khz',n:'1 kHz',f:1000},{p:'5khz',n:'5 kHz',f:5000}];
 function buildLed(){
   const box=$('ledbtns');box.innerHTML='';
   for(const m of MODES){
@@ -164,7 +164,7 @@ function buildLed(){
 function paintLed(param){
   for(const b of $('ledbtns').children)b.classList.toggle('act',b.dataset.p===param);
   const m=MODES.find(x=>x.p===param);
-  $('ledmeta').textContent=m?('当前模式: '+m.n+(m.f?(' @ '+m.f+' Hz, 占空比 50%'):' (GPIO 恒亮 100%)')):'--';
+  $('ledmeta').textContent=m?('当前模式: '+m.n+(m.p==='off'?' (GPIO 恒灭 0%)':(m.f?(' @ '+m.f+' Hz, 占空比 50%'):' (GPIO 恒亮 100%)'))):'--';
 }
 async function applyMode(p){
   $('ledmeta').textContent='设置中...';
@@ -284,8 +284,8 @@ function render(d){
   $('vavg').textContent=d.vavg.toFixed(1);
   lastFreq=d.freq;
   const z=$('zone');
-  z.textContent=d.zone;
-  z.className='value '+(d.zcode===1?'z-fail':d.zcode===2?'z-exempt':'z-pass');
+  z.textContent=VNAME[d.zcode]||d.zone;
+  z.className='value '+(d.zcode>=1&&d.zcode<=3?'z-fail':d.zcode===4?'z-exempt':'z-pass');
   drawWave(d.wmin,d.wmax);
   drawSpec(d.spec);
   $('meta').textContent='窗口 #'+d.seq+' · '+d.samples+' 样本 · DMA 溢出 '+d.ovf+
@@ -337,13 +337,18 @@ function drawWave(wmn,wmx){
 function drawSpec(sp){
   const c=setup($('spec')),ctx=c.ctx,w=c.w,h=c.h;
   const L=46,R=10,T=10,B=20,gw=w-L-R,gh=h-T-B;
+  // 对数横轴: 后端频谱点已按对数频带分组 (4.883 Hz ~ 5 kHz), 组号线性 = 对数线性
+  const FMIN=4.883,FMAX=5000,xg=f=>L+gw*Math.log(f/FMIN)/Math.log(FMAX/FMIN);
   ctx.font='10px monospace';ctx.lineWidth=1;
-  for(let k=0;k<=10;k++){
-    const x=Math.round(L+gw*k/10)+.5;
-    ctx.strokeStyle='#21262d';
+  ctx.strokeStyle='#21262d';
+  ctx.beginPath();ctx.moveTo(Math.round(L)+.5,T);ctx.lineTo(Math.round(L)+.5,T+gh);
+  ctx.moveTo(w-R-.5,T);ctx.lineTo(w-R-.5,T+gh);ctx.stroke();
+  for(const f of [10,100,1000]){
+    const x=Math.round(xg(f))+.5;
     ctx.beginPath();ctx.moveTo(x,T);ctx.lineTo(x,T+gh);ctx.stroke();
-    if(k%2===0){ctx.fillStyle='#8b949e';ctx.fillText(k+'k',x-8,h-6);}
+    ctx.fillStyle='#8b949e';ctx.fillText(f>=1000?'1k':''+f,x-6,h-6);
   }
+  ctx.fillStyle='#8b949e';ctx.fillText('5k',w-R-14,h-6);
   if(!sp||!sp.length)return;
   let mx=0;for(const v of sp)if(v>mx)mx=v;
   if(mx<=0)mx=1;
@@ -353,8 +358,8 @@ function drawSpec(sp){
   ctx.lineTo(L+gw,T+gh);ctx.closePath();
   ctx.fillStyle='rgba(63,185,80,0.15)';ctx.fill();
   ctx.strokeStyle='#3fb950';ctx.lineWidth=1.2;ctx.stroke();
-  if(lastFreq>0&&lastFreq<10000){
-    const x=Math.round(L+gw*lastFreq/10000)+.5;
+  if(lastFreq>=FMIN&&lastFreq<=FMAX){
+    const x=Math.round(xg(lastFreq))+.5;
     ctx.strokeStyle='#f0883e';ctx.setLineDash([4,3]);
     ctx.beginPath();ctx.moveTo(x,T);ctx.lineTo(x,T+gh);ctx.stroke();
     ctx.setLineDash([]);
@@ -422,7 +427,7 @@ bool webdashBegin(void)
               { req->send_P(200, "text/html", INDEX_HTML); });
 
     // LED 模式查询/设置: GET /led        → 当前模式 JSON
-    //                    GET /led?mode=X → 切换模式 (const|50hz|100hz|500hz|1khz|5khz)
+    //                    GET /led?mode=X → 切换模式 (const|50hz|100hz|500hz|1khz|5khz|off)
     server.on("/led", HTTP_GET, [](AsyncWebServerRequest *req)
     {
         if (req->hasParam("mode"))
@@ -535,8 +540,8 @@ static char jsonBuf[12 * 1024];
 
 static size_t buildJson(const FlickerSnapshot *s)
 {
-    static const char *zoneNames[] = {"PASS", "FAIL", "EXEMPT"};
-    const char *zone = s->noisePass ? "PASS (<1%)" : zoneNames[s->zone];
+    static const char *zoneNames[] = {"PASS", "FAIL-M", "FAIL-PST", "FAIL-BOTH", "EXEMPT"};
+    const char *zone = zoneNames[s->zone];
 
     int n = snprintf(jsonBuf, sizeof(jsonBuf),
                      "{\"seq\":%lu,\"samples\":%lu,\"ovf\":%lu,"

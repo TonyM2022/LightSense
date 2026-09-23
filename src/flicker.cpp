@@ -3,7 +3,7 @@
 //   Flicker %    : 相对峰谷幅度 (IEEE 1789 Percent Flicker = 国标波动深度)
 //   Flicker Index: 均值以上面积/总面积 (IEEE 1789, 时域)
 //   Pst (LM)     : IEC TR 61547-1 谱估计 Pst = sqrt(Σ (m_k·H(f_k))²)
-//   Freq / Zone  : FFT 主频 + GB 40070-2021 波动深度合规判定
+//   Freq / Zone  : FFT 主频 + 综合判定 (GB 40070 波动深度 + Pst^LM ≤ 1)
 // 网页快照: 每个报告窗口填充最新波形包络/平均频谱/指标, 供 webdash 层推送
 #include <Arduino.h>
 #include <arduinoFFT.h>
@@ -60,22 +60,27 @@ static float flickerWeight(float f)
     return 0.0f;
 }
 
-// ---------------- GB 40070-2021 波动深度合规判定 ----------------
-// 输入: f = 主频 (Hz), m = 波动深度/Percent Flicker (%)
-// 限值 (表4): 0.1% (f<=10) | 0.01f (10~90) | 0.032f (90~3125) | >3125 免除考核
-// 返回: 0=合规 1=超标 2=高频豁免
-static uint8_t gb40070Zone(float f, float m)
+// ---------------- 综合判定 (GB 40070-2021 + Pst^LM) ----------------
+// 与教室测量同一口径: 波动深度 vs 表4 限值 (按主频) + Pst^LM ≤ 1,
+// m<1% 视为噪声直接合规; >3125 Hz 豁免波动深度考核 (Pst 仍判)
+uint8_t flickerVerdict(float freq, float m, float pst)
 {
-    if (f > 3125.0f)
-        return 2;
+    if (m < 1.0f)
+        return FV_PASS;                 // 噪声门限
 
-    float limit = (f <= 10.0f)  ? 0.1f
-                : (f <= 90.0f)  ? 0.01f  * f
-                :                 0.032f * f;
-    if (m <= limit)
-        return 0;
+    bool pstOK = (pst <= 1.0f);
+    if (freq > 3125.0f)
+        return pstOK ? FV_EXEMPT : FV_FAIL_PST;
 
-    return 1;
+    float limit = (freq <= 10.0f)  ? 0.1f
+                : (freq <= 90.0f)  ? 0.01f  * freq
+                :                    0.032f * freq;
+    bool mOK = (m <= limit);
+
+    if (mOK && pstOK)   return FV_PASS;
+    if (!mOK && pstOK)  return FV_FAIL_M;
+    if (mOK && !pstOK)  return FV_FAIL_PST;
+    return FV_FAIL_BOTH;
 }
 
 void flickerResetWindow(void)
@@ -163,15 +168,38 @@ void flickerReport(uint32_t overflow)
     // Flicker Index (IEEE 1789): 均值以上面积 / 总面积
     float flickerIndex = (winSum > 0) ? (winAboveMean / (float)winSum) : 0.0f;
 
-    // 在平均频谱中搜索主频峰值 (库内置对数域抛物线插值)
+    // 在平均频谱中搜索主频峰值 (bin 1 起, 抛物线插值细分)
+    // 注: 不用 FFT.setArrays()+majorPeak() —— setArrays 每次报告都
+    //     delete[]/new[] 未初始化的窗系数缓存, 而 windowing() 会按旧标志
+    //     直接复用该缓存, 堆上垃圾被当作 Hann 系数 (FFT 输出全 NaN 的根因)
     float freq = 0.0f;
     if (winCount > 0)
     {
-        FFT.setArrays(specAccum, vImag, FFT_SIZE);
-        freq = FFT.majorPeak();
-        FFT.setArrays(vReal, vImag, FFT_SIZE);
+        uint32_t kMax = 1;
+        float mMax = specAccum[1];
+        for (uint32_t k = 2; k < FFT_SIZE / 2; k++)
+        {
+            if (specAccum[k] > mMax)
+            {
+                mMax = specAccum[k];
+                kMax = k;
+            }
+        }
+        if (mMax > 0.0f)
+        {
+            float ym1 = specAccum[kMax - 1];
+            float yp1 = specAccum[kMax + 1];
+            float den = ym1 - 2.0f * mMax + yp1;
+            float delta = (den < -1e-12f) ? 0.5f * (ym1 - yp1) / den
+                                          : 0.0f;
+            if (delta > 0.5f)
+                delta = 0.5f;
+            if (delta < -0.5f)
+                delta = -0.5f;
+            freq = ((float)kMax + delta) * FFT_BIN_HZ;
+        }
     }
-    // 纯噪声/无信号时插值可能得到 NaN (log(0) 谱线), 归零保护
+    // 纯噪声/无信号保护
     if (isnan(freq) || freq < 0.0f)
         freq = 0.0f;
 
@@ -218,25 +246,11 @@ void flickerReport(uint32_t overflow)
     Serial.print(freq, 2);
     Serial.println(" Hz");
 
-    // GB 40070-2021 波动深度合规判定 (基于主频 + 整体波动深度)
-    snap.noisePass = (flickerPercent < 1.0f) ? 1 : 0;
-    snap.zone = snap.noisePass ? 0 : gb40070Zone(freq, flickerPercent);
-    const char *zoneStr;
-    if (snap.noisePass)
-    {
-        zoneStr = "PASS (<1%)";
-    }
-    else
-    {
-        switch (snap.zone)
-        {
-            case 0:  zoneStr = "PASS";   break;
-            case 1:  zoneStr = "FAIL";   break;
-            default: zoneStr = "EXEMPT"; break;
-        }
-    }
-    Serial.print("Zone     : GB40070 ");
-    Serial.println(zoneStr);
+    // 综合判定: GB 40070-2021 波动深度 + Pst^LM ≤ 1 (与教室测量口径一致)
+    snap.zone = flickerVerdict(freq, flickerPercent, pstLM);
+    static const char *const zoneStr[] = {"PASS", "FAIL-M", "FAIL-PST", "FAIL-BOTH", "EXEMPT"};
+    Serial.print("Zone     : GB+Pst ");
+    Serial.println(zoneStr[snap.zone]);
 
     if (overflow > 0)
     {
@@ -263,21 +277,33 @@ void flickerReport(uint32_t overflow)
         snap.wmin[g] = lastWmin[g];
         snap.wmax[g] = lastWmax[g];
     }
-    // 频谱: 窗口平均后按组 max-pool 降采样 (跳过 DC bin 0)
+    // 频谱: 窗口平均后按对数频带 max-pool 降采样 (跳过 DC bin 0, 显示上限 5 kHz)
+    // 正向映射 bin k -> 组 g = N*ln(k)/ln(KMAX): 组号线性 = 对数线性 (与前端刻度一致);
+    // 低频端多组共享同一 bin, 空组延续前一组的值 (阶梯平台), 高频端每组约 27 bin 取 max
     uint8_t nb = (winBlocks > 0) ? winBlocks : 1;
-    for (uint32_t g = 0; g < WEB_SPEC_POINTS; g++)
+    const uint32_t kLogMax = (uint32_t)(5000.0f / FFT_BIN_HZ);
+    const float N_OVER_LOGR = (float)WEB_SPEC_POINTS / logf((float)kLogMax);
+    int32_t gPrev = -1;
+    for (uint32_t k = 1; k <= kLogMax; k++)
     {
-        float m = 0.0f;
-        for (uint32_t b = 0; b < (FFT_SIZE / 2) / WEB_SPEC_POINTS; b++)
+        int32_t g = (int32_t)(logf((float)k) * N_OVER_LOGR);
+        if (g > WEB_SPEC_POINTS - 1)
+            g = WEB_SPEC_POINTS - 1;
+        float a = specAccum[k] / (float)nb;
+        if (g > gPrev)
         {
-            uint32_t k = 1 + g * ((FFT_SIZE / 2) / WEB_SPEC_POINTS) + b;
-            if (k > FFT_SIZE / 2)
-                break;
-            float a = specAccum[k] / (float)nb;
-            if (a > m) m = a;
+            for (int32_t q = gPrev + 1; q < g; q++)   // 无 bin 覆盖的组: 延续前值
+                snap.spec[q] = (gPrev >= 0) ? snap.spec[gPrev] : 0.0f;
+            snap.spec[g] = a;
+            gPrev = g;
         }
-        snap.spec[g] = m;
+        else if (a > snap.spec[g])
+        {
+            snap.spec[g] = a;
+        }
     }
+    while (gPrev + 1 < (int32_t)WEB_SPEC_POINTS)      // 兜底: 末尾空组
+        snap.spec[++gPrev] = snap.spec[gPrev];
 
     flickerResetWindow();
 }

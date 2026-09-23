@@ -4,14 +4,15 @@
 #include "config.h"
 #include "led_pwm.h"
 
-// 模式表 (URL 参数与 LightSource 项目保持一致)
-// freq = 0 表示常亮: 脱离 LEDC 直接拉高 GPIO, 输出真正的直流
+// 模式表 (URL 参数与 LightSource 项目保持一致, "off" 为本项目扩展)
+// freq = 0 表示恒定电平: 脱离 LEDC 直接驱动 GPIO (const=高电平常亮, off=低电平常灭)
 static const struct
 {
     const char *name;    // 显示名
     const char *param;   // URL 参数
     uint32_t freq;       // 输出频率 (Hz)
 } MODES[LED_MODE_COUNT] = {
+    {"常灭",   "off",   0},
     {"常亮",   "const", 0},
     {"50 Hz",  "50hz",  50},
     {"100 Hz", "100hz", 100},
@@ -26,7 +27,7 @@ bool ledPwmBegin(void)
 {
     ledcSetup(LED_PWM_CHANNEL, 5000, LED_PWM_RESOLUTION);
     ledcAttachPin(LED_PIN, LED_PWM_CHANNEL);
-    ledPwmSetMode(0);                    // 默认常亮
+    ledPwmSetMode(0);                    // 默认常灭 (1=常亮)
     return true;
 }
 
@@ -38,9 +39,9 @@ void ledPwmSetMode(uint8_t idx)
 
     if (MODES[idx].freq == 0)
     {
-        // 常亮: 脱离 LEDC, GPIO 恒定输出高电平
+        // 恒定电平: 脱离 LEDC, const 输出高 (常亮), off 输出低 (常灭)
         ledcDetachPin(LED_PIN);
-        digitalWrite(LED_PIN, HIGH);
+        digitalWrite(LED_PIN, (strcmp(MODES[idx].param, "off") == 0) ? LOW : HIGH);
     }
     else
     {

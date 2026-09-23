@@ -4,12 +4,12 @@
 // 时序由 LEDC 外设硬件保证, 不受主循环 / WiFi / ADC 干扰
 #include <stdint.h>
 
-#define LED_MODE_COUNT       6
+#define LED_MODE_COUNT       7
 
-// 初始化 LEDC 并默认输出常亮
+// 初始化 LEDC 并默认输出常灭
 bool ledPwmBegin(void);
 
-// 切换输出模式: 0=常亮(100%) 1=50Hz 2=100Hz 3=500Hz 4=1kHz 5=5kHz (其余 50% 占空比)
+// 切换输出模式: 0=常灭(0%) 1=常亮(100%) 2=50Hz 3=100Hz 4=500Hz 5=1kHz 6=5kHz (闪烁模式 50% 占空比)
 void ledPwmSetMode(uint8_t idx);
 
 // 当前模式索引

@@ -16,7 +16,7 @@
 #define WIFI_AP_SSID         "LightSense"         // AP 热点名
 #define WIFI_AP_PASS         "lightsense"         // AP 密码 (至少 8 位)
 #define WEB_WAVE_POINTS      256                  // 波形包络段数 (每段 16 点取 min/max)
-#define WEB_SPEC_POINTS      256                  // 频谱显示点数 (窗口平均后 max-pool)
+#define WEB_SPEC_POINTS      256                  // 频谱显示点数 (对数频带 max-pool, 4.9 Hz~5 kHz)
 
 // ---------------- LED PWM 控制 ----------------
 #define LED_PIN              21                   // D8 = GPIO21 → 220~330Ω → LED → GND
