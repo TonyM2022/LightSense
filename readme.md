@@ -83,7 +83,7 @@ IEEE 1789 在 (频率 f [Hz], 调制深度 m [%]) 平面上给出两档推荐实
 - **f 取自 FFT 主频**：4096 点 FFT @ 20 ksps，对 5 块频谱做幅度平均后用 `majorPeak()`
   （对数域抛物线插值）提取主导闪烁频率，分辨率 4.88 Hz。
 - **m 取自波动深度**（= Percent Flicker）：报告窗口（约 1.024 s，20480 样本）内峰谷值计算。
-- 判定函数 `gb40070Zone(f, m)`（src/main.cpp）：
+- 判定函数 `gb40070Zone(f, m)`（src/flicker.cpp）：
 
 ```c
 static uint8_t gb40070Zone(float f, float m)
@@ -99,6 +99,18 @@ static uint8_t gb40070Zone(float f, float m)
 
 - **WiFi 网页仪表**（src/webdash.*）：S3 开 AP 热点 `LightSense`（密码 `lightsense`），浏览器访问
   `http://192.168.4.1`，WebSocket 每报告窗口推送 JSON 快照（波形包络 / 频谱 / 指标）实时刷新。
+  网页含三个页面（顶部按钮切换）：**频闪仪**（实时指标 + 波形 + 频谱）、**LED 控制**、**教室测量**。
+- **LED 频率输出**（src/led_pwm.*）：D8 = GPIO21 → 220~330Ω → LED → GND，LEDC 硬件 PWM 占空比 50%，
+  模式：常亮 / 50 Hz / 100 Hz / 500 Hz / 1 kHz / 5 kHz（常亮为 GPIO 恒亮 100%）。
+  网页「LED 控制」页切换（`GET /led`，`?mode=const|50hz|100hz|500hz|1khz|5khz`），
+  与测量互不干扰——把光传感器对准外接 LED 即可闭环自测（主频应跟随输出频率）。
+- **教室灯光测量**（src/classroom.*）：面向教室照明验收场景，支持多灯具依次测量并可打标签
+  （留空自动编号）。单次测量固定 29 个报告窗口 ≈ 30 s，聚合：波动深度均值/峰值、Flicker Index、
+  Pst^LM 均值/峰值、主频（取频谱能量最大窗口）。
+  判定口径：**波动深度 30s 均值** vs 国标表 4 限值（按主频分段）+ **Pst^LM 30s 均值 ≤ 1**；
+  m < 1% 视为噪声直接 PASS，f > 3125 Hz 高频豁免。
+  记录 NVS 断电保存（最多 50 条），网页可导出 CSV（带 BOM，Excel 直接打开）。
+  API：`GET /api/classroom`（状态+记录）、`POST /api/classroom/start?label=`、`POST /api/classroom/clear`。
 - **串口输出示例**：
 
 ```
@@ -114,7 +126,9 @@ Zone     : GB40070 FAIL
 2. **频率分辨率**：4.88 Hz bin 宽度使 <15 Hz 频段的主频提取精度有限。
 3. **噪声门限**：m < 1% 直接判 PASS，掩盖了 f≤10Hz 频段 0.1% 的严格限值场景
    （实测噪声本底约 0.1~0.5%，无法可靠分辨）。
-4. **Pst^LM 为 1.024 s 瞬时估计**：标准 Pst 用 10 分钟统计评估器。
+4. **Pst^LM 为短时估计**：实时仪表为 1.024 s 瞬时值；教室测量模式聚合 30 s 均值，
+   仍非标准要求的 10 分钟统计评估器。
+5. **教室测量的代表性**：单测点只反映测点位置光照，教室验收应多点测量（中心 + 四角等）并用标签区分；逐窗均值会平滑掉 30 s 内的短时波动（峰值栏可参考）。
 
 ## 7. 快速对照表
 
