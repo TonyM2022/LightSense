@@ -6,7 +6,8 @@
 //                  m_k = 2|X_k|/|X_DC| (相对平均光水平), H = 1/可见阈值, 加权 4.9~80 Hz
 //   SVM          : IEC TR 63158 频闪可见度 SVM = (Σ (C_m/T(f_m))^3.7)^(1/3.7), 80~2000 Hz
 //                  T(f) = 2.865e-5·f^1.543 + 0.225 (50% 人群可见阈)
-//   Freq / Zone  : FFT 主频 (仅展示) + 综合判定 (Pst^LM ≤ 1 + SVM ≤ 0.4, v0.9 起; 波动深度仅展示)
+//   Freq / Zone  : FFT 主频 (仅展示) + 综合判定 (v1.1: 光照量程前置否决 +
+//                  Pst^LM ≤ 1 + SVM ≤ 0.4; 波动深度仅展示)
 // 网页快照: 每个报告窗口填充最新波形包络/平均频谱/指标, 供 webdash 层推送
 #include <Arduino.h>
 #include <arduinoFFT.h>
@@ -142,11 +143,16 @@ static float svmFromSpectrum(const float *spec, float dcRef)
     return (s > 0.0f) ? powf(s, 1.0f / 3.7f) : 0.0f;
 }
 
-// ---------------- 综合判定 (Pst^LM + SVM, v0.9) ----------------
-// 与教室测量同一口径: Pst^LM ≤ 1 (IEC TR 61547-1) + SVM ≤ 0.4 (IEC TR 63158 / EU 2024);
-// 波动深度与主频仅展示不判定; 判定入参为平滑后显示值 (教室侧为全窗均值)
-uint8_t flickerVerdict(float pst, float svm)
+// ---------------- 综合判定 (光照前置 + Pst^LM + SVM, v1.1) ----------------
+// 光照量程前置否决: 窗口均值 ADC 码过暗/过亮时 Pst/SVM 数据无效, 直接判光照异常
+//   过暗: DC 基准过小噪声底虚高; 过亮: 接近满量程削顶引入假谐波
+// 双指标口径 (v0.9): Pst^LM ≤ 1 (IEC TR 61547-1) + SVM ≤ 0.4 (IEC TR 63158 / EU 2024)
+// 频闪仪页入参为 1s 窗值, 教室侧为全窗均值; 波动深度与主频仅展示不判定
+uint8_t flickerVerdict(float pst, float svm, float vavg)
 {
+    if (vavg < (float)ADC_DARK_LIMIT)   return FV_DARK;
+    if (vavg > (float)ADC_BRIGHT_LIMIT) return FV_BRIGHT;
+
     bool pstOK = (pst <= 1.0f);
     bool svmOK = (svm <= 0.4f);
 
@@ -336,10 +342,12 @@ void flickerReport(uint32_t overflow)
     Serial.print(freq, 2);
     Serial.println(" Hz");
 
-    // 综合判定: Pst^LM ≤ 1 + SVM ≤ 0.4 (v0.9, 与教室测量口径一致)
-    snap.zone = flickerVerdict(pst, svm);
-    static const char *const zoneStr[] = {"PASS", "FAIL-M", "FAIL-PST", "FAIL-BOTH", "EXEMPT", "FAIL-SVM"};
-    Serial.print("Zone     : Pst+SVM ");
+    // 综合判定: 光照量程前置否决 + Pst^LM ≤ 1 + SVM ≤ 0.4 (v1.1, 与教室测量口径一致)
+    snap.vavg = (float)winSum / (float)winCount;
+    snap.zone = flickerVerdict(pst, svm, snap.vavg);
+    static const char *const zoneStr[] = {"PASS", "FAIL-M", "FAIL-PST", "FAIL-BOTH",
+                                          "EXEMPT", "FAIL-SVM", "TOO-DARK", "TOO-BRIGHT"};
+    Serial.print("Zone     : Light+Pst+SVM ");
     Serial.println(zoneStr[snap.zone]);
 
     if (overflow > 0)
@@ -357,7 +365,6 @@ void flickerReport(uint32_t overflow)
     snap.overflow = overflow;
     snap.vmax = winMax;
     snap.vmin = winMin;
-    snap.vavg = (float)winSum / (float)winCount;
     snap.flickerPercent = flickerPercent;
     snap.flickerIndex = flickerIndex;
     snap.pstLM = pst;

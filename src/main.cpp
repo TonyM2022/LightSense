@@ -10,9 +10,12 @@
       Samples / Max / Min / Average / Flicker % / Flicker Index / Pst(LM) / SVM / Flicker Frequency / Zone
       - Flicker %    : 相对峰谷幅度 (IEEE 1789 Percent Flicker = 国标波动深度)
       - Flicker Index: 均值以上面积/总面积 (IEEE 1789, 时域)
-      - Zone         : 综合判定 (v0.9: Pst^LM ≤ 1 + SVM ≤ 0.4, 与教室测量同口径; 波动深度/主频仅展示)
+      - Zone         : 综合判定 (v1.1: 光照量程前置否决 + Pst^LM ≤ 1 + SVM ≤ 0.4, 与教室测量同口径;
+                       波动深度/主频仅展示)
                        结果: PASS=合规 FAIL-PST=Pst超标 FAIL-SVM=SVM超标
-                             FAIL-BOTH=双项超标 (FAIL-M/EXEMPT 仅旧记录显示)
+                             FAIL-BOTH=双项超标 TOO-DARK=光线过暗 TOO-BRIGHT=光线太亮
+                             (窗口均值 ADC 码 <300 过暗 / >3100 过亮, 见 config.h;
+                              FAIL-M/EXEMPT 仅旧记录显示)
       - Pst (LM)     : IEC TR 61547-1 短时闪烁严重度谱估计
                        Pst = sqrt(Σ (m_k·H(f_k))²), m_k=2|X_k|/|X_DC| (相对平均光水平),
                        H = 1/可见阈值 (IEC 61000-4-15 Table 2, 0.25% @8.8Hz → Pst=1),
@@ -27,8 +30,9 @@
       - 网页 LED 控制页切换, 与测量互不干扰 (可照射自测)
   6. 教室灯光测量 (classroom 层):
       - 多灯具依次测量, 时长可选 30s / 1min / 10min (29/58/586 窗口), 可打标签
-      - 聚合: 波动深度均值/峰值 (仅展示), Flicker Index, Pst^LM 均值/峰值, SVM 均值/峰值, 主频 (仅展示)
-      - 判定 (v0.9): Pst^LM 均值 ≤ 1 + SVM 均值 ≤ 0.4
+      - 聚合: 波动深度均值/峰值 (仅展示), Flicker Index, Pst^LM 均值/峰值, SVM 均值/峰值,
+              光照均值 ADC 码 (判定前置量程检查), 主频 (仅展示)
+      - 判定 (v1.1): 光照量程前置否决 + Pst^LM 均值 ≤ 1 + SVM 均值 ≤ 0.4
       - 记录 NVS 持久化, 网页可导出 CSV
 
   说明:

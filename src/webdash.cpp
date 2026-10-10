@@ -79,7 +79,7 @@ canvas{width:100%;height:180px;display:block}
   <div class="card"><div class="label">Pst<sup>LM</sup> (1s 窗值)</div><div class="value"><span id="pst">--</span></div></div>
   <div class="card"><div class="label">SVM (频闪可见度)</div><div class="value"><span id="svm">--</span></div><div class="meta" style="margin-top:4px">限值: ≤0.4 (EU 2024) / ≤1 可见阈</div></div>
   <div class="card"><div class="label">主频</div><div class="value"><span id="freq">--</span><small>Hz</small></div></div>
-  <div class="card"><div class="label">综合判定 (Pst^LM + SVM)</div><div class="value" id="zone">--</div><div class="meta" style="margin-top:4px">限值: Pst^LM ≤ 1 / SVM ≤ 0.4</div></div>
+  <div class="card"><div class="label">综合判定 (光照 + Pst<sup>LM</sup> + SVM)</div><div class="value" id="zone">--</div><div class="meta" style="margin-top:4px">光照均值 300~3100 码 / Pst<sup>LM</sup> ≤ 1 / SVM ≤ 0.4</div></div>
 </div>
 <div class="card wide"><div class="label">时域波形 (末块包络, 204.8 ms, ADC 码)</div><canvas id="wave"></canvas></div>
 <div class="card wide"><div class="label">频谱 (窗口平均, 对数轴 4.9 Hz ~ 5 kHz)</div><canvas id="spec"></canvas></div>
@@ -120,7 +120,7 @@ canvas{width:100%;height:180px;display:block}
     <div class="meta" id="clsstat">待机 · 时长可选 30 s / 1 min / 10 min</div>
   </div>
   <div class="card wide">
-    <div class="label">最近结果 (Pst^LM ≤ 1 + SVM ≤ 0.4)</div>
+    <div class="label">最近结果 (光照 + Pst^LM ≤ 1 + SVM ≤ 0.4)</div>
     <div class="value" id="clsv">--</div>
     <div class="cards" style="margin:10px 0 0">
       <div><div class="label">波动深度 均值</div><div class="value" style="font-size:18px"><span id="clsm">--</span><small>%</small></div></div>
@@ -131,6 +131,7 @@ canvas{width:100%;height:180px;display:block}
       <div><div class="label">Pst^LM 峰值</div><div class="value" style="font-size:18px" id="clspx">--</div></div>
       <div><div class="label">SVM 均值</div><div class="value" style="font-size:18px" id="clssvm">--</div></div>
       <div><div class="label">SVM 峰值</div><div class="value" style="font-size:18px" id="clssvmx">--</div></div>
+      <div><div class="label">光照均值</div><div class="value" style="font-size:18px" id="clsvavg">--</div></div>
     </div>
     <div class="meta" id="clslbl2" style="margin-top:8px">尚未测量</div>
   </div>
@@ -144,7 +145,7 @@ canvas{width:100%;height:180px;display:block}
   </div>
   <div class="card wide">
     <div class="label">说明与局限</div>
-    <div class="meta">判定口径 (v0.9): Pst^LM 取本次测量均值 ≤ 1 (IEC TR 61547-1), SVM 取本次测量均值 ≤ 0.4 (IEC TR 63158, EU 2024 生态设计限值); 波动深度与主频仅展示不判定。局限: ① 单测点只反映测点位置光照, 教室验收应多点测量 (中心+四角) 并用标签区分; ② 30s/1min 档 Pst^LM 为短时估计, 标准口径 10min (可选 10min 档); ③ 4.88Hz 频率分辨率, &lt;15Hz 主频精度有限; ④ 旧版本记录为旧口径判定或无 SVM, 建议清空重测。</div>
+    <div class="meta">判定口径 (v1.1): 光照前置检查 (窗口均值 ADC 码 &lt;300 光线过暗 / &gt;3100 光线太亮, 此时 Pst/SVM 无效) → Pst^LM 取本次测量均值 ≤ 1 (IEC TR 61547-1), SVM 取本次测量均值 ≤ 0.4 (IEC TR 63158, EU 2024 生态设计限值); 波动深度与主频仅展示不判定。局限: ① 单测点只反映测点位置光照, 教室验收应多点测量 (中心+四角) 并用标签区分; ② 30s/1min 档 Pst^LM 为短时估计, 标准口径 10min (可选 10min 档); ③ 4.88Hz 频率分辨率, &lt;15Hz 主频精度有限; ④ 旧版本记录为旧口径判定或无 SVM/光照, 建议清空重测。</div>
   </div>
 </section>
 <script>
@@ -190,8 +191,8 @@ async function refreshMode(){
 buildLed();refreshMode();
 
 // ---------------- 教室测量 ----------------
-const VNAME={0:'合规 PASS',1:'超标 · 波动深度',2:'超标 · Pst^LM',3:'超标 · 双项',4:'高频豁免',5:'超标 · SVM'};
-const VCLS={0:'z-pass',1:'z-fail',2:'z-fail',3:'z-fail',4:'z-exempt',5:'z-fail'};
+const VNAME={0:'合规 PASS',1:'超标 · 波动深度',2:'超标 · Pst^LM',3:'超标 · 双项',4:'高频豁免',5:'超标 · SVM',6:'光线过暗',7:'光线太亮'};
+const VCLS={0:'z-pass',1:'z-fail',2:'z-fail',3:'z-fail',4:'z-exempt',5:'z-fail',6:'z-fail',7:'z-fail'};
 const durName=w=>w>=586?'10min':(w>=58?'1min':'30s');
 let clsList=[];
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
@@ -207,12 +208,13 @@ function paintClsRes(r){
   $('clspx').textContent=r.pstmax.toFixed(3);
   $('clssvm').textContent=(r.s!=null)?r.s.toFixed(3):'--';
   $('clssvmx').textContent=(r.sx!=null)?r.sx.toFixed(3):'--';
+  $('clsvavg').textContent=(r.va!=null)?r.va:'--';
   $('clslbl2').textContent='标签: '+r.lb+' · 测量于开机 T+'+r.ts+' s · 主频取频谱能量最大窗口';
 }
 function paintClsTable(){
-  let h='<tr><th>#</th><th>标签</th><th>时长</th><th>主频</th><th>m 均值</th><th>m 峰值</th><th>Pst 均值</th><th>SVM 均值</th><th>判定</th></tr>';
+  let h='<tr><th>#</th><th>标签</th><th>时长</th><th>主频</th><th>m 均值</th><th>m 峰值</th><th>Pst 均值</th><th>SVM 均值</th><th>光照</th><th>判定</th></tr>';
   clsList.forEach((r,i)=>{
-    h+='<tr><td>'+(i+1)+'</td><td>'+esc(r.lb)+'</td><td>'+durName(r.w||29)+'</td><td>'+r.f.toFixed(1)+' Hz</td><td>'+r.m.toFixed(2)+'%</td><td>'+r.mx.toFixed(2)+'%</td><td>'+r.p.toFixed(3)+'</td><td>'+(r.s!=null?r.s.toFixed(3):'--')+'</td><td class="vchip '+(VCLS[r.v]||'')+'">'+(VNAME[r.v]||'--')+'</td></tr>';
+    h+='<tr><td>'+(i+1)+'</td><td>'+esc(r.lb)+'</td><td>'+durName(r.w||29)+'</td><td>'+r.f.toFixed(1)+' Hz</td><td>'+r.m.toFixed(2)+'%</td><td>'+r.mx.toFixed(2)+'%</td><td>'+r.p.toFixed(3)+'</td><td>'+(r.s!=null?r.s.toFixed(3):'--')+'</td><td>'+(r.va!=null?r.va:'--')+'</td><td class="vchip '+(VCLS[r.v]||'')+'">'+(VNAME[r.v]||'--')+'</td></tr>';
   });
   $('clstbl').innerHTML=h;
   $('clscnt').textContent=clsList.length;
@@ -245,8 +247,8 @@ async function clsClear(){
       $('clslbl2').textContent='尚未测量';}catch(e){alert('清空失败: '+e);}
 }
 function clsCsv(){
-  const rows=[['#','标签','时长','T+秒','主频Hz','m均值%','m峰值%','FlickerIndex','Pst均值','Pst峰值','SVM均值','SVM峰值','判定']];
-  clsList.forEach((r,i)=>rows.push([i+1,r.lb,durName(r.w||29),r.ts,r.f.toFixed(2),r.m.toFixed(2),r.mx.toFixed(2),r.fi.toFixed(3),r.p.toFixed(3),r.px.toFixed(3),(r.s!=null?r.s.toFixed(3):''),(r.sx!=null?r.sx.toFixed(3):''),VNAME[r.v]||'']));
+  const rows=[['#','标签','时长','T+秒','主频Hz','m均值%','m峰值%','FlickerIndex','Pst均值','Pst峰值','SVM均值','SVM峰值','光照ADC','判定']];
+  clsList.forEach((r,i)=>rows.push([i+1,r.lb,durName(r.w||29),r.ts,r.f.toFixed(2),r.m.toFixed(2),r.mx.toFixed(2),r.fi.toFixed(3),r.p.toFixed(3),r.px.toFixed(3),(r.s!=null?r.s.toFixed(3):''),(r.sx!=null?r.sx.toFixed(3):''),(r.va!=null?r.va:''),VNAME[r.v]||'']));
   const csv='\ufeff'+rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\r\n');
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
@@ -486,11 +488,13 @@ bool webdashBegin(void)
         {
             char lb[80];
             jsonEscape(lb, sizeof(lb), rs[i].label);
-            char sv[40];
+            char sv[56];
+            sv[0] = 0;
             if (rs[i].svmMean > 0.0f)    // 旧版本记录 svmMean==0 → 不输出 s/sx, 前端显示 --
                 snprintf(sv, sizeof(sv), ",\"s\":%.3f,\"sx\":%.3f", rs[i].svmMean, rs[i].svmMax);
-            else
-                sv[0] = 0;
+            if (rs[i].vavgMean > 0)      // v1.0 及以前记录无光照 → 不输出 va, 前端显示 --
+                snprintf(sv + strlen(sv), sizeof(sv) - strlen(sv), ",\"va\":%u",
+                         (unsigned)rs[i].vavgMean);
             n += snprintf(cb + n, sizeof(cb) - n,
                           "%s{\"i\":%u,\"lb\":\"%s\",\"ts\":%lu,\"w\":%u,\"m\":%.2f,\"mx\":%.2f,"
                           "\"fi\":%.3f,\"p\":%.3f,\"px\":%.3f,\"f\":%.2f,\"v\":%u%s}",
@@ -506,11 +510,13 @@ bool webdashBegin(void)
             const ClassroomRecord *L = &rs[nR - 1];
             char lb[80];
             jsonEscape(lb, sizeof(lb), L->label);
-            char sv[40];
+            char sv[56];
+            sv[0] = 0;
             if (L->svmMean > 0.0f)
                 snprintf(sv, sizeof(sv), ",\"s\":%.3f,\"sx\":%.3f", L->svmMean, L->svmMax);
-            else
-                sv[0] = 0;
+            if (L->vavgMean > 0)
+                snprintf(sv + strlen(sv), sizeof(sv) - strlen(sv), ",\"va\":%u",
+                         (unsigned)L->vavgMean);
             n += snprintf(cb + n, sizeof(cb) - n,
                           "{\"lb\":\"%s\",\"m\":%.2f,\"mmax\":%.2f,\"fi\":%.3f,"
                           "\"pst\":%.3f,\"pstmax\":%.3f,\"freq\":%.2f,\"v\":%u,\"ts\":%lu,\"w\":%u%s}",
@@ -573,7 +579,8 @@ static char jsonBuf[12 * 1024];
 
 static size_t buildJson(const FlickerSnapshot *s)
 {
-    static const char *zoneNames[] = {"PASS", "FAIL-M", "FAIL-PST", "FAIL-BOTH", "EXEMPT", "FAIL-SVM"};
+    static const char *zoneNames[] = {"PASS", "FAIL-M", "FAIL-PST", "FAIL-BOTH",
+                                      "EXEMPT", "FAIL-SVM", "DARK", "BRIGHT"};
     const char *zone = zoneNames[s->zone];
 
     int n = snprintf(jsonBuf, sizeof(jsonBuf),
@@ -615,11 +622,13 @@ static size_t buildJson(const FlickerSnapshot *s)
     {
         char lb[80];
         jsonEscape(lb, sizeof(lb), cr.label);
-        char sv[40];
+        char sv[56];
+        sv[0] = 0;
         if (cr.svmMean > 0.0f)
             snprintf(sv, sizeof(sv), ",\"s\":%.3f,\"sx\":%.3f", cr.svmMean, cr.svmMax);
-        else
-            sv[0] = 0;
+        if (cr.vavgMean > 0)
+            snprintf(sv + strlen(sv), sizeof(sv) - strlen(sv), ",\"va\":%u",
+                     (unsigned)cr.vavgMean);
         n += snprintf(jsonBuf + n, sizeof(jsonBuf) - n,
                       ",\"res\":{\"lb\":\"%s\",\"m\":%.2f,\"mx\":%.2f,\"fi\":%.3f,"
                       "\"p\":%.3f,\"px\":%.3f,\"f\":%.2f,\"v\":%u,\"ts\":%lu,\"w\":%u%s}",

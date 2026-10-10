@@ -14,6 +14,11 @@
 #define SVM_BIN_MIN          17                   // SVM 求和下限 bin (83.0 Hz, IEC TR 63158 频段 80~2000 Hz)
 #define SVM_BIN_MAX          409                  // SVM 求和上限 bin (1997.1 Hz)
 
+// 综合判定前置光照检查 (v1.1): 窗口均值 ADC 码超出量程 → 光照异常, Pst/SVM 数据无效
+// 过暗: DC 基准过小噪声底虚高; 过亮: 接近 12bit 满量程 (4095) 可能削顶引入假谐波
+#define ADC_DARK_LIMIT       300                  // 窗口均值 < 300 判光线过暗
+#define ADC_BRIGHT_LIMIT     3100                 // 窗口均值 > 3100 判光线太亮
+
 // ---------------- WiFi 网页仪表 ----------------
 #define WIFI_AP_SSID         "LightSense"         // AP 热点名
 #define WIFI_AP_PASS         "lightsense"         // AP 密码 (至少 8 位)

@@ -1,8 +1,8 @@
 #pragma once
 // ---------------- 教室灯光测量层 ----------------
 // 多灯具依次测量: 时长可选 30s / 1min / 10min 档, 逐窗口聚合指标,
-// 判定 (v0.9): Pst^LM 均值 ≤ 1 + SVM 均值 ≤ 0.4 (波动深度/主频仅展示不判定);
-// 记录 NVS 持久化, 断电不丢
+// 判定 (v1.1): 光照量程前置否决 + Pst^LM 均值 ≤ 1 + SVM 均值 ≤ 0.4
+// (波动深度/主频/光照仅展示或检查不参与双指标); 记录 NVS 持久化, 断电不丢
 #include <stdint.h>
 #include "flicker.h"
 
@@ -20,13 +20,14 @@ typedef struct {
     float    pstMean;            // Pst^LM 均值 (判定用)
     float    pstMax;             // Pst^LM 峰值 (展示用)
     float    freq;               // 主频 Hz (取频谱能量最大窗口)
-    uint8_t  verdict;            // FV_* 综合判定码 (v0.9: Pst^LM+SVM 口径; 旧记录为旧口径)
+    uint8_t  verdict;            // FV_* 综合判定码 (v1.1: 光照+Pst^LM+SVM 口径; 旧记录为旧口径)
     uint16_t windows;            // 测量窗口数 (v0.7.1 旧记录无此字段, 读到的填充字节恒 0, 载入时补 30s 档)
     float    svmMean;            // SVM 均值 (判定用 ≤0.4; 旧记录为 0 → 网页显示 --)
     float    svmMax;             // SVM 峰值 (仅展示)
+    uint16_t vavgMean;           // 光照均值 ADC 码 (v1.1 判定前置量程检查用; 旧记录为 0 → 网页显示 --)
 } ClassroomRecord;
 
-// 初始化: 从 NVS 加载历史记录 (兼容无 windows/SVM 字段的旧版本记录)
+// 初始化: 从 NVS 加载历史记录 (按 blob 长度兼容 v0.7.1 64B / v0.8~v0.9 72B / 当前 74B)
 void classroomBegin(void);
 
 // 开始一次测量 (运行中或记录已满返回 false)

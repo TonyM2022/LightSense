@@ -1,13 +1,15 @@
 // ---------------- 教室灯光测量层实现 ----------------
-// 聚合口径 (v0.9 判定切换):
+// 聚合口径 (v1.1 判定):
+//   光照    : 窗口均值 ADC 码取均值, 判定前置量程检查 (过暗/过亮直接判异常)
 //   Pst^LM  : 全部窗口均值判定 ≤ 1 (峰值仅展示)
 //   SVM     : 全部窗口均值判定 ≤ 0.4 (峰值仅展示)
 //   波动深度: 全部窗口均值, 仅展示不判定
 //   主频    : 取频谱能量最大窗口的主频, 仅展示
 // 时长档位: 30s (29 窗) / 1min (58 窗) / 10min (586 窗), 网页选择
-// 存储: NVS namespace "cls", 键 cnt + r0..rN-1. 记录 blob 三代:
-//   v0.7.1 64B (无 windows/svm) / 中间版 64B (仅 windows) / 当前版 72B (windows + svm),
-//   按 blob 长度识别; 64B 旧记录 windows==0 (v0.7.1 填充字节恒 0) 补 30s 档, SVM 补 0 (网页显示 --)
+// 存储: NVS namespace "cls", 键 cnt + r0..rN-1. 记录 blob 四代:
+//   v0.7.1 64B (无 windows/svm/vavg) / 中间版 64B (仅 windows) /
+//   v0.8~v0.9 72B (+svm) / 当前版 74B (+vavg), 按 blob 长度识别;
+//   64B 旧记录 windows==0 (v0.7.1 填充字节恒 0) 补 30s 档, SVM/vavg 补 0 (网页显示 --)
 #include <Arduino.h>
 #include <Preferences.h>
 #include <stddef.h>
@@ -31,6 +33,7 @@ static float accPst = 0.0f;
 static float accPstMax = 0.0f;
 static float accSvm = 0.0f;
 static float accSvmMax = 0.0f;
+static float accV = 0.0f;               // 光照 (窗口均值 ADC 码) 累加
 static float bestEnergy = -1.0f;        // 频谱能量最大窗口
 static float bestFreq = 0.0f;
 static char runLabel[32];
@@ -59,12 +62,18 @@ void classroomBegin(void)
         char key[8];
         snprintf(key, sizeof(key), "r%u", i);
         size_t got = prefs.getBytes(key, &recs[i], sizeof(ClassroomRecord));
-        if (got == offsetof(ClassroomRecord, svmMean))
+        if (got == offsetof(ClassroomRecord, vavgMean))
         {
-            // 64B 旧 blob: v0.7.1 (无 windows/svm) 或中间版 (仅 windows)
+            // 72B blob: v0.8~v0.9 (有 windows/svm, 无 vavg)
+            recs[i].vavgMean = 0;
+        }
+        else if (got == offsetof(ClassroomRecord, svmMean))
+        {
+            // 64B 旧 blob: v0.7.1 (无 windows/svm/vavg) 或中间版 (仅 windows)
             if (recs[i].windows == 0)
                 recs[i].windows = CLS_WINDOWS;   // v0.7.1: windows 落在填充字节, 恒 0
             recs[i].svmMean = recs[i].svmMax = 0.0f;
+            recs[i].vavgMean = 0;
         }
         else if (got != sizeof(ClassroomRecord))
         {
@@ -94,7 +103,7 @@ bool classroomStart(const char *label, uint16_t windows)
     running = true;
     runWindows = 0;
     runTarget = windows;
-    accM = accMMax = accFI = accPst = accPstMax = accSvm = accSvmMax = 0.0f;
+    accM = accMMax = accFI = accPst = accPstMax = accSvm = accSvmMax = accV = 0.0f;
     bestEnergy = -1.0f;
     bestFreq = 0.0f;
 
@@ -146,6 +155,7 @@ bool classroomOnWindow(const FlickerSnapshot *s)
     if (s->pstLM > accPstMax) accPstMax = s->pstLM;
     accSvm += s->svm;
     if (s->svm > accSvmMax) accSvmMax = s->svm;
+    accV += s->vavg;
 
     float e = 0.0f;
     for (int i = 0; i < WEB_SPEC_POINTS; i++)
@@ -171,8 +181,9 @@ bool classroomOnWindow(const FlickerSnapshot *s)
     r.pstMax  = accPstMax;
     r.svmMean = accSvm / (float)runTarget;
     r.svmMax  = accSvmMax;
+    r.vavgMean = (uint16_t)(accV / (float)runTarget + 0.5f);
     r.freq    = bestFreq;
-    r.verdict = flickerVerdict(r.pstMean, r.svmMean);
+    r.verdict = flickerVerdict(r.pstMean, r.svmMean, (float)r.vavgMean);
 
     recs[recCount++] = r;
     nvsSaveRecord(recCount - 1);
@@ -190,6 +201,8 @@ bool classroomOnWindow(const FlickerSnapshot *s)
     Serial.print(r.pstMean, 3);
     Serial.print(" svm=");
     Serial.print(r.svmMean, 3);
+    Serial.print(" vavg=");
+    Serial.print(r.vavgMean);
     Serial.print(" f=");
     Serial.print(r.freq, 2);
     Serial.print("Hz wins=");
