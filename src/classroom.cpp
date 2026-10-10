@@ -1,11 +1,16 @@
 // ---------------- 教室灯光测量层实现 ----------------
 // 聚合口径 (用户确认):
-//   波动深度: 29 窗口均值判定 (峰值仅展示), <1% 视为噪声 PASS
-//   Pst^LM  : 29 窗口均值判定 ≤ 1 (峰值仅展示)
+//   波动深度: 全部窗口均值判定 (峰值仅展示), <1% 视为噪声 PASS
+//   Pst^LM  : 全部窗口均值判定 ≤ 1 (峰值仅展示)
 //   主频    : 取频谱能量最大窗口的主频
-// 存储: NVS namespace "cls", 键 cnt + r0..rN-1 (每记录 65 字节 blob)
+// 时长档位: 30s (29 窗) / 1min (58 窗) / 10min (586 窗), 网页选择
+// SVM: 逐窗口聚合均值/峰值, 仅展示, 不参与 flickerVerdict 判定
+// 存储: NVS namespace "cls", 键 cnt + r0..rN-1. 记录 blob 三代:
+//   v0.7.1 64B (无 windows/svm) / 中间版 64B (仅 windows) / 当前版 72B (windows + svm),
+//   按 blob 长度识别; 64B 旧记录 windows==0 (v0.7.1 填充字节恒 0) 补 30s 档, SVM 补 0 (网页显示 --)
 #include <Arduino.h>
 #include <Preferences.h>
+#include <stddef.h>
 #include "config.h"
 #include "flicker.h"
 #include "classroom.h"
@@ -15,6 +20,7 @@ static ClassroomRecord recs[CLS_MAX_RECORDS];
 static uint16_t recCount = 0;
 static uint16_t autoIndex = 0;          // 自动命名计数
 static bool running = false;
+static uint16_t runTarget = CLS_WINDOWS; // 本次测量目标窗口数
 
 // 测量累加器
 static uint32_t runWindows = 0;
@@ -23,6 +29,8 @@ static float accMMax = 0.0f;
 static float accFI = 0.0f;
 static float accPst = 0.0f;
 static float accPstMax = 0.0f;
+static float accSvm = 0.0f;
+static float accSvmMax = 0.0f;
 static float bestEnergy = -1.0f;        // 频谱能量最大窗口
 static float bestFreq = 0.0f;
 static char runLabel[32];
@@ -51,7 +59,14 @@ void classroomBegin(void)
         char key[8];
         snprintf(key, sizeof(key), "r%u", i);
         size_t got = prefs.getBytes(key, &recs[i], sizeof(ClassroomRecord));
-        if (got != sizeof(ClassroomRecord))
+        if (got == offsetof(ClassroomRecord, svmMean))
+        {
+            // 64B 旧 blob: v0.7.1 (无 windows/svm) 或中间版 (仅 windows)
+            if (recs[i].windows == 0)
+                recs[i].windows = CLS_WINDOWS;   // v0.7.1: windows 落在填充字节, 恒 0
+            recs[i].svmMean = recs[i].svmMax = 0.0f;
+        }
+        else if (got != sizeof(ClassroomRecord))
         {
             recCount = i;               // 记录损坏, 截断
             break;
@@ -65,14 +80,21 @@ void classroomBegin(void)
 }
 
 // ---------------- 控制 ----------------
-bool classroomStart(const char *label)
+bool classroomStart(const char *label, uint16_t windows)
 {
     if (running || recCount >= CLS_MAX_RECORDS)
         return false;
 
+    // 时长档位限定 (非法值回落 30s 档)
+    if (windows != CLS_WINDOWS &&
+        windows != CLS_WINDOWS_1MIN &&
+        windows != CLS_WINDOWS_10MIN)
+        windows = CLS_WINDOWS;
+
     running = true;
     runWindows = 0;
-    accM = accMMax = accFI = accPst = accPstMax = 0.0f;
+    runTarget = windows;
+    accM = accMMax = accFI = accPst = accPstMax = accSvm = accSvmMax = 0.0f;
     bestEnergy = -1.0f;
     bestFreq = 0.0f;
 
@@ -88,7 +110,11 @@ bool classroomStart(const char *label)
 
     Serial.print("Classroom: start \"");
     Serial.print(runLabel);
-    Serial.println("\"");
+    Serial.print("\", ");
+    Serial.print(runTarget);
+    Serial.print(" windows (");
+    Serial.print((float)runTarget * 1.024f, 1);
+    Serial.println(" s)");
     return true;
 }
 
@@ -102,6 +128,11 @@ uint32_t classroomWindowsDone(void)
     return runWindows;
 }
 
+uint16_t classroomWindowsTarget(void)
+{
+    return runTarget;
+}
+
 // ---------------- 逐窗口聚合 ----------------
 bool classroomOnWindow(const FlickerSnapshot *s)
 {
@@ -113,6 +144,8 @@ bool classroomOnWindow(const FlickerSnapshot *s)
     accFI += s->flickerIndex;
     accPst += s->pstLM;
     if (s->pstLM > accPstMax) accPstMax = s->pstLM;
+    accSvm += s->svm;
+    if (s->svm > accSvmMax) accSvmMax = s->svm;
 
     float e = 0.0f;
     for (int i = 0; i < WEB_SPEC_POINTS; i++)
@@ -123,18 +156,21 @@ bool classroomOnWindow(const FlickerSnapshot *s)
         bestFreq = s->freqHz;
     }
 
-    if (++runWindows < CLS_WINDOWS)
+    if (++runWindows < runTarget)
         return false;
 
     // 测量完成: 汇总并入库
     ClassroomRecord r = {};
     r.ts = millis() / 1000;
     strncpy(r.label, runLabel, sizeof(r.label) - 1);
-    r.mMean   = accM / (float)CLS_WINDOWS;
+    r.windows = runTarget;
+    r.mMean   = accM / (float)runTarget;
     r.mMax    = accMMax;
-    r.fi      = accFI / (float)CLS_WINDOWS;
-    r.pstMean = accPst / (float)CLS_WINDOWS;
+    r.fi      = accFI / (float)runTarget;
+    r.pstMean = accPst / (float)runTarget;
     r.pstMax  = accPstMax;
+    r.svmMean = accSvm / (float)runTarget;
+    r.svmMax  = accSvmMax;
     r.freq    = bestFreq;
     r.verdict = flickerVerdict(r.freq, r.mMean, r.pstMean);
 
@@ -152,9 +188,13 @@ bool classroomOnWindow(const FlickerSnapshot *s)
     Serial.print(r.mMean, 2);
     Serial.print("% pst=");
     Serial.print(r.pstMean, 3);
+    Serial.print(" svm=");
+    Serial.print(r.svmMean, 3);
     Serial.print(" f=");
     Serial.print(r.freq, 2);
-    Serial.print("Hz verdict=");
+    Serial.print("Hz wins=");
+    Serial.print(r.windows);
+    Serial.print(" verdict=");
     Serial.println(r.verdict);
     return true;
 }

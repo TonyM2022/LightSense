@@ -7,7 +7,7 @@
       - 缓存   : 4096 点/块
   2. FFT 频谱分析 (arduinoFFT 库, 4096 点, Hann 窗, 去直流, 峰值插值提频)
   3. 串口输出统计 (每 5 块 ≈ 1.024 s 一次):
-      Samples / Max / Min / Average / Flicker % / Flicker Index / Pst(LM) / Flicker Frequency / Zone
+      Samples / Max / Min / Average / Flicker % / Flicker Index / Pst(LM) / SVM / Pst(10min) / Flicker Frequency / Zone
       - Flicker %    : 相对峰谷幅度 (IEEE 1789 Percent Flicker = 国标波动深度)
       - Flicker Index: 均值以上面积/总面积 (IEEE 1789, 时域)
       - Zone         : 综合判定 (GB 40070-2021 波动深度 + Pst^LM ≤ 1, 与教室测量同口径)
@@ -15,8 +15,9 @@
                        结果: PASS=合规 FAIL-M=波动深度超标 FAIL-PST=Pst超标
                              FAIL-BOTH=双项超标 EXEMPT=高频豁免; m<1% 视为噪声直接 PASS
       - Pst (LM)     : IEC TR 61547-1 短时闪烁严重度谱估计
-                       Pst = sqrt(Σ (m_k·H(f_k))²), m_k=2|X_k|/|X_0| (Hann 归一化),
-                       H 为 IEC 61000-4-15 人眼加权曲线 (8.8Hz 处归一化为 1)
+                       Pst = sqrt(Σ (m_k·H(f_k))²), m_k=2|X_k|/|X_DC| (相对平均光水平),
+                       H = 1/可见阈值 (IEC 61000-4-15 Table 2, 0.25% @8.8Hz → Pst=1),
+                       加权范围 4.9~80 Hz (>35Hz 阈值按 f² 滚降外推)
                        注意: 受 4.88Hz 频率分辨率限制, <15Hz 频段精度有限
   4. WiFi 网页仪表 (webdash 层):
       - S3 开 AP 热点 (SSID 见 config.h), 浏览器访问 http://192.168.4.1
@@ -26,8 +27,8 @@
       - LEDC 硬件 PWM: 常灭 / 常亮 / 50Hz / 100Hz / 500Hz / 1kHz / 5kHz, 闪烁模式占空比 50%
       - 网页 LED 控制页切换, 与测量互不干扰 (可照射自测)
   6. 教室灯光测量 (classroom 层):
-      - 多灯具依次测量, 每次固定 29 窗口 ≈ 30s, 可打标签
-      - 聚合: 波动深度均值/峰值, Flicker Index, Pst^LM 均值/峰值, 主频
+      - 多灯具依次测量, 时长可选 30s / 1min / 10min (29/58/586 窗口), 可打标签
+      - 聚合: 波动深度均值/峰值, Flicker Index, Pst^LM 均值/峰值, SVM 均值/峰值 (仅记录), 主频
       - 判定: 波动深度均值 vs GB 40070 表4 限值 + Pst^LM 均值 ≤ 1
       - 记录 NVS 持久化, 网页可导出 CSV
 
@@ -41,7 +42,7 @@
   - adc_dma.*  : 驱动层 (ADC DMA 初始化, 整块读取, TYPE2 帧解析, 诊断)
   - led_pwm.*  : 驱动层 (LEDC PWM 输出, 模式切换)
   - flicker.*  : 度量层 (窗口统计, FFT, 指标计算, 报告输出, 网页快照)
-  - classroom.*: 度量层扩展 (教室多灯具 30s 测量, GB 判定, NVS 记录)
+  - classroom.*: 度量层扩展 (教室多灯具测量 30s/1min/10min, GB 判定, NVS 记录)
   - webdash.*  : 网页层 (AP 热点, Web 服务器, WebSocket JSON 推送, 控制路由)
   - main.cpp   : 编排 (setup/loop)
 */

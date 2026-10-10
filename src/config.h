@@ -10,7 +10,9 @@
 #define DMA_BUF_BYTES        (FFT_SIZE * BYTES_PER_SAMPLE)
 #define BLOCKS_PER_REPORT    5                    // 5 块 ≈ 1.024 s 输出一次
 #define FFT_BIN_HZ           ((float)SAMPLE_RATE_HZ / (float)FFT_SIZE)
-#define PST_BIN_MAX          7                    // Pst 求和上限 bin (34.2 Hz, 加权表至 35 Hz)
+#define PST_BIN_MAX          16                   // Pst 求和上限 bin (78.1 Hz, 加权覆盖至 80 Hz)
+#define SVM_BIN_MIN          17                   // SVM 求和下限 bin (83.0 Hz, IEC TR 63158 频段 80~2000 Hz)
+#define SVM_BIN_MAX          409                  // SVM 求和上限 bin (1997.1 Hz)
 
 // ---------------- WiFi 网页仪表 ----------------
 #define WIFI_AP_SSID         "LightSense"         // AP 热点名

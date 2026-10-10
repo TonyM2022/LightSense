@@ -4,7 +4,7 @@
 //   WS  /ws   → 每报告窗口广播一次 JSON 快照 (指标 + 波形包络 + 频谱 + 教室进度)
 //   GET /led  → 查询/设置 LED 输出模式 (?mode=const|50hz|100hz|500hz|1khz|5khz|off)
 //   GET  /api/classroom        → 教室测量状态 + 记录列表
-//   POST /api/classroom/start  → 开始一次 30s 测量 (?label=灯具标签)
+//   POST /api/classroom/start  → 开始测量 (?label=灯具标签&dur=30|60|600 秒)
 //   POST /api/classroom/clear  → 清空记录
 #include <Arduino.h>
 #include <WiFi.h>
@@ -52,6 +52,7 @@ canvas{width:100%;height:180px;display:block}
 .btns button:active{transform:scale(.97)}
 .cls-row{display:flex;gap:8px;margin-bottom:10px}
 .cls-row input{flex:1;background:var(--bg);border:1px solid var(--edge);color:var(--txt);border-radius:8px;padding:9px 10px;font-size:14px;min-width:0}
+.cls-row select{background:var(--bg);border:1px solid var(--edge);color:var(--txt);border-radius:8px;padding:9px 8px;font-size:14px;cursor:pointer}
 .cls-row button{background:#238636;border:1px solid #2ea043;color:#fff;font-size:14px;font-weight:600;border-radius:8px;padding:9px 20px;cursor:pointer;white-space:nowrap}
 .cls-row button:disabled{opacity:.45;cursor:not-allowed}
 .pwrap{height:8px;background:#21262d;border-radius:4px;overflow:hidden;margin-bottom:8px}
@@ -75,7 +76,8 @@ canvas{width:100%;height:180px;display:block}
 <div class="cards">
   <div class="card"><div class="label">波动深度 (Percent Flicker)</div><div class="value"><span id="flk">--</span><small>%</small></div></div>
   <div class="card"><div class="label">Flicker Index</div><div class="value"><span id="fi">--</span></div></div>
-  <div class="card"><div class="label">Pst<sup>LM</sup></div><div class="value"><span id="pst">--</span></div></div>
+  <div class="card"><div class="label">Pst<sup>LM</sup> (1s 平滑)</div><div class="value"><span id="pst">--</span></div><div class="meta" style="margin-top:4px">10min: <span id="pst10">--</span> <span id="pst10w"></span></div></div>
+  <div class="card"><div class="label">SVM (频闪可见度)</div><div class="value"><span id="svm">--</span></div><div class="meta" style="margin-top:4px">限值: ≤0.4 (EU 2024) / ≤1 可见阈</div></div>
   <div class="card"><div class="label">主频</div><div class="value"><span id="freq">--</span><small>Hz</small></div></div>
   <div class="card"><div class="label">综合判定 (GB + Pst^LM)</div><div class="value" id="zone">--</div></div>
 </div>
@@ -104,13 +106,18 @@ canvas{width:100%;height:180px;display:block}
 </section>
 <section id="pg-cls" style="display:none">
   <div class="card wide">
-    <div class="label">灯具标签 (留空自动编号)</div>
+    <div class="label">测量时长与灯具标签 (留空自动编号)</div>
     <div class="cls-row">
+      <select id="clsdur">
+        <option value="30">30 s</option>
+        <option value="60">1 min</option>
+        <option value="600">10 min</option>
+      </select>
       <input id="clslbl" maxlength="20" placeholder="例如: 第3排靠窗 / 讲台正中">
       <button id="clsbtn" onclick="clsStart()">开始测量</button>
     </div>
     <div class="pwrap"><div class="pbar" id="clspbar"></div></div>
-    <div class="meta" id="clsstat">待机 · 每次测量约 30 s (29 个窗口)</div>
+    <div class="meta" id="clsstat">待机 · 时长可选 30 s / 1 min / 10 min</div>
   </div>
   <div class="card wide">
     <div class="label">最近结果 (GB 40070-2021 + Pst^LM ≤ 1)</div>
@@ -122,6 +129,8 @@ canvas{width:100%;height:180px;display:block}
       <div><div class="label">Flicker Index</div><div class="value" style="font-size:18px" id="clsfi">--</div></div>
       <div><div class="label">Pst^LM 均值</div><div class="value" style="font-size:18px" id="clsp">--</div></div>
       <div><div class="label">Pst^LM 峰值</div><div class="value" style="font-size:18px" id="clspx">--</div></div>
+      <div><div class="label">SVM 均值</div><div class="value" style="font-size:18px" id="clssvm">--</div></div>
+      <div><div class="label">SVM 峰值</div><div class="value" style="font-size:18px" id="clssvmx">--</div></div>
     </div>
     <div class="meta" id="clslbl2" style="margin-top:8px">尚未测量</div>
   </div>
@@ -135,7 +144,7 @@ canvas{width:100%;height:180px;display:block}
   </div>
   <div class="card wide">
     <div class="label">说明与局限</div>
-    <div class="meta">判定口径: 波动深度取 30s 均值 vs 国标表4 限值 (按主频), Pst^LM 取 30s 均值 ≤ 1。局限: ① 单测点只反映测点位置光照, 教室验收应多点测量 (中心+四角) 并用标签区分; ② Pst^LM 为 30s 估计, 标准要求 10min; ③ 4.88Hz 频率分辨率, &lt;15Hz 主频精度有限; ④ 波动深度 &lt;1% 视为噪声直接判合规。</div>
+    <div class="meta">判定口径: 波动深度取本次测量均值 vs 国标表4 限值 (按主频), Pst^LM 取本次测量均值 ≤ 1。局限: ① 单测点只反映测点位置光照, 教室验收应多点测量 (中心+四角) 并用标签区分; ② 30s/1min 档 Pst^LM 为短时估计, 标准口径 10min (可选 10min 档); ③ 4.88Hz 频率分辨率, &lt;15Hz 主频精度有限; ④ 波动深度 &lt;1% 视为噪声直接判合规; ⑤ SVM (80~2000 Hz 频闪可见度, IEC TR 63158) 仅记录展示不参与 GB 判定, 旧版本记录无 SVM 显示 --。</div>
   </div>
 </section>
 <script>
@@ -183,6 +192,7 @@ buildLed();refreshMode();
 // ---------------- 教室测量 ----------------
 const VNAME={0:'合规 PASS',1:'超标 · 波动深度',2:'超标 · Pst^LM',3:'超标 · 双项',4:'高频豁免'};
 const VCLS={0:'z-pass',1:'z-fail',2:'z-fail',3:'z-fail',4:'z-exempt'};
+const durName=w=>w>=586?'10min':(w>=58?'1min':'30s');
 let clsList=[];
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function paintClsRes(r){
@@ -195,12 +205,14 @@ function paintClsRes(r){
   $('clsfi').textContent=r.fi.toFixed(3);
   $('clsp').textContent=r.pst.toFixed(3);
   $('clspx').textContent=r.pstmax.toFixed(3);
+  $('clssvm').textContent=(r.s!=null)?r.s.toFixed(3):'--';
+  $('clssvmx').textContent=(r.sx!=null)?r.sx.toFixed(3):'--';
   $('clslbl2').textContent='标签: '+r.lb+' · 测量于开机 T+'+r.ts+' s · 主频取频谱能量最大窗口';
 }
 function paintClsTable(){
-  let h='<tr><th>#</th><th>标签</th><th>主频</th><th>m 均值</th><th>m 峰值</th><th>Pst 均值</th><th>判定</th></tr>';
+  let h='<tr><th>#</th><th>标签</th><th>时长</th><th>主频</th><th>m 均值</th><th>m 峰值</th><th>Pst 均值</th><th>SVM 均值</th><th>判定</th></tr>';
   clsList.forEach((r,i)=>{
-    h+='<tr><td>'+(i+1)+'</td><td>'+esc(r.lb)+'</td><td>'+r.f.toFixed(1)+' Hz</td><td>'+r.m.toFixed(2)+'%</td><td>'+r.mx.toFixed(2)+'%</td><td>'+r.p.toFixed(3)+'</td><td class="vchip '+(VCLS[r.v]||'')+'">'+(VNAME[r.v]||'--')+'</td></tr>';
+    h+='<tr><td>'+(i+1)+'</td><td>'+esc(r.lb)+'</td><td>'+durName(r.w||29)+'</td><td>'+r.f.toFixed(1)+' Hz</td><td>'+r.m.toFixed(2)+'%</td><td>'+r.mx.toFixed(2)+'%</td><td>'+r.p.toFixed(3)+'</td><td>'+(r.s!=null?r.s.toFixed(3):'--')+'</td><td class="vchip '+(VCLS[r.v]||'')+'">'+(VNAME[r.v]||'--')+'</td></tr>';
   });
   $('clstbl').innerHTML=h;
   $('clscnt').textContent=clsList.length;
@@ -213,16 +225,17 @@ async function clsRefresh(){
     paintClsTable();
     if(j.latest)paintClsRes(j.latest);
     $('clsbtn').disabled=!!j.run;
-    if(!j.run)$('clspbar').style.width=(j.nwin>=29?'100%':'0%');
+    if(!j.run)$('clspbar').style.width=(j.nwin>=(j.tot||29)?'100%':'0%');
   }catch(e){}
 }
 async function clsStart(){
-  const lbl=$('clslbl').value.trim();
+  const lbl=$('clslbl').value.trim(),dur=$('clsdur').value;
   try{
-    const r=await fetch('/api/classroom/start?label='+encodeURIComponent(lbl),{method:'POST'});
+    const r=await fetch('/api/classroom/start?label='+encodeURIComponent(lbl)+'&dur='+dur,{method:'POST'});
     if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.err||r.status);}
     $('clsbtn').disabled=true;
-    $('clsstat').textContent='测量中 0 / 29 窗口 (~30 s)...';
+    const wn={30:29,60:58,600:586}[dur]||29,dl=dur>=60?(dur/60)+' min':dur+' s';
+    $('clsstat').textContent='测量中 0 / '+wn+' 窗口 (~'+dl+')...';
   }catch(e){alert('开始失败: '+e);}
 }
 async function clsClear(){
@@ -232,8 +245,8 @@ async function clsClear(){
       $('clslbl2').textContent='尚未测量';}catch(e){alert('清空失败: '+e);}
 }
 function clsCsv(){
-  const rows=[['#','标签','T+秒','主频Hz','m均值%','m峰值%','FlickerIndex','Pst均值','Pst峰值','判定']];
-  clsList.forEach((r,i)=>rows.push([i+1,r.lb,r.ts,r.f.toFixed(2),r.m.toFixed(2),r.mx.toFixed(2),r.fi.toFixed(3),r.p.toFixed(3),r.px.toFixed(3),VNAME[r.v]||'']));
+  const rows=[['#','标签','时长','T+秒','主频Hz','m均值%','m峰值%','FlickerIndex','Pst均值','Pst峰值','SVM均值','SVM峰值','判定']];
+  clsList.forEach((r,i)=>rows.push([i+1,r.lb,durName(r.w||29),r.ts,r.f.toFixed(2),r.m.toFixed(2),r.mx.toFixed(2),r.fi.toFixed(3),r.p.toFixed(3),r.px.toFixed(3),(r.s!=null?r.s.toFixed(3):''),(r.sx!=null?r.sx.toFixed(3):''),VNAME[r.v]||'']));
   const csv='\ufeff'+rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\r\n');
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
@@ -242,19 +255,19 @@ function clsCsv(){
   URL.revokeObjectURL(a.href);
 }
 function clsUpdate(c){
-  const pct=c.res?100:Math.round(100*c.win/c.tot);
+  const pct=c.res?100:Math.round(100*c.win/(c.tot||29));
   $('clspbar').style.width=pct+'%';
   if(c.run){
     $('clsbtn').disabled=true;
-    $('clsstat').textContent='测量中 '+c.win+' / '+c.tot+' 窗口 (~30 s) · 实时 m '+c.m.toFixed(2)+'% · '+c.freq.toFixed(1)+' Hz';
+    $('clsstat').textContent='测量中 '+c.win+' / '+c.tot+' 窗口 (~'+durName(c.tot)+') · 实时 m '+c.m.toFixed(2)+'% · '+c.freq.toFixed(1)+' Hz';
   }else{
     $('clsbtn').disabled=false;
     if(c.res){
       paintClsRes(c.res);
       clsRefresh();
-      $('clsstat').textContent='测量完成: '+(VNAME[c.res.v]||'');
+      $('clsstat').textContent='测量完成 ('+durName(c.res.w||29)+'): '+(VNAME[c.res.v]||'');
     }else if($('clsstat').textContent.startsWith('测量中')){
-      $('clsstat').textContent='待机 · 每次测量约 30 s (29 个窗口)';
+      $('clsstat').textContent='待机 · 时长可选 30 s / 1 min / 10 min';
     }
   }
 }
@@ -278,6 +291,10 @@ function render(d){
   $('flk').textContent=d.flk.toFixed(2);
   $('fi').textContent=d.fi.toFixed(3);
   $('pst').textContent=d.pst.toFixed(3);
+  $('pst10').textContent=(d.pst10||0).toFixed(3);
+  const pmn=(d.pst10w||0)*1.024/60;
+  $('pst10w').textContent=pmn>=10?'(满 10min)':'(累积 '+pmn.toFixed(1)+' min)';
+  $('svm').textContent=(d.svm||0).toFixed(3);
   $('freq').textContent=d.freq.toFixed(2);
   $('vmax').textContent=d.vmax;
   $('vmin').textContent=d.vmin;
@@ -467,18 +484,24 @@ bool webdashBegin(void)
                          "{\"run\":%u,\"nwin\":%lu,\"tot\":%u,\"n\":%u,\"records\":[",
                          (unsigned)classroomIsRunning(),
                          (unsigned long)classroomWindowsDone(),
-                         (unsigned)CLS_WINDOWS, (unsigned)nR);
+                         (unsigned)classroomWindowsTarget(), (unsigned)nR);
         for (uint16_t i = 0; i < nR && n < (int)sizeof(cb) - 192; i++)
         {
             char lb[80];
             jsonEscape(lb, sizeof(lb), rs[i].label);
+            char sv[40];
+            if (rs[i].svmMean > 0.0f)    // 旧版本记录 svmMean==0 → 不输出 s/sx, 前端显示 --
+                snprintf(sv, sizeof(sv), ",\"s\":%.3f,\"sx\":%.3f", rs[i].svmMean, rs[i].svmMax);
+            else
+                sv[0] = 0;
             n += snprintf(cb + n, sizeof(cb) - n,
-                          "%s{\"i\":%u,\"lb\":\"%s\",\"ts\":%lu,\"m\":%.2f,\"mx\":%.2f,"
-                          "\"fi\":%.3f,\"p\":%.3f,\"px\":%.3f,\"f\":%.2f,\"v\":%u}",
+                          "%s{\"i\":%u,\"lb\":\"%s\",\"ts\":%lu,\"w\":%u,\"m\":%.2f,\"mx\":%.2f,"
+                          "\"fi\":%.3f,\"p\":%.3f,\"px\":%.3f,\"f\":%.2f,\"v\":%u%s}",
                           (i ? "," : ""), (unsigned)i, lb,
-                          (unsigned long)rs[i].ts, rs[i].mMean, rs[i].mMax,
+                          (unsigned long)rs[i].ts, (unsigned)rs[i].windows,
+                          rs[i].mMean, rs[i].mMax,
                           rs[i].fi, rs[i].pstMean, rs[i].pstMax, rs[i].freq,
-                          (unsigned)rs[i].verdict);
+                          (unsigned)rs[i].verdict, sv);
         }
         n += snprintf(cb + n, sizeof(cb) - n, "],\"latest\":");
         if (nR > 0)
@@ -486,11 +509,17 @@ bool webdashBegin(void)
             const ClassroomRecord *L = &rs[nR - 1];
             char lb[80];
             jsonEscape(lb, sizeof(lb), L->label);
+            char sv[40];
+            if (L->svmMean > 0.0f)
+                snprintf(sv, sizeof(sv), ",\"s\":%.3f,\"sx\":%.3f", L->svmMean, L->svmMax);
+            else
+                sv[0] = 0;
             n += snprintf(cb + n, sizeof(cb) - n,
                           "{\"lb\":\"%s\",\"m\":%.2f,\"mmax\":%.2f,\"fi\":%.3f,"
-                          "\"pst\":%.3f,\"pstmax\":%.3f,\"freq\":%.2f,\"v\":%u,\"ts\":%lu}",
+                          "\"pst\":%.3f,\"pstmax\":%.3f,\"freq\":%.2f,\"v\":%u,\"ts\":%lu,\"w\":%u%s}",
                           lb, L->mMean, L->mMax, L->fi, L->pstMean, L->pstMax,
-                          L->freq, (unsigned)L->verdict, (unsigned long)L->ts);
+                          L->freq, (unsigned)L->verdict, (unsigned long)L->ts,
+                          (unsigned)L->windows, sv);
         }
         else
         {
@@ -500,14 +529,21 @@ bool webdashBegin(void)
         req->send(200, "application/json", cb);
     });
 
-    // 教室测量: 开始一次 30s 测量 (?label=灯具标签, 可省略)
+    // 教室测量: 开始一次测量 (?label=灯具标签, ?dur=30|60|600 秒, 均可省略, 默认 30s 档)
     server.on("/api/classroom/start", HTTP_POST, [](AsyncWebServerRequest *req)
     {
         String label = "";
         if (req->hasParam("label"))
             label = req->getParam("label")->value();
         utf8Trunc(label, 31);
-        if (!classroomStart(label.c_str()))
+        uint16_t wins = CLS_WINDOWS;
+        if (req->hasParam("dur"))
+        {
+            long dur = req->getParam("dur")->value().toInt();
+            if (dur >= 300)      wins = CLS_WINDOWS_10MIN;
+            else if (dur >= 60)  wins = CLS_WINDOWS_1MIN;
+        }
+        if (!classroomStart(label.c_str(), wins))
         {
             req->send(409, "application/json", "{\"err\":\"busy or records full\"}");
             return;
@@ -534,7 +570,7 @@ bool webdashBegin(void)
 }
 
 // ---------------- JSON 快照构建 ----------------
-// 格式: {"seq","samples","ovf","vmax","vmin","vavg","flk","fi","pst","freq","zcode","zone",
+// 格式: {"seq","samples","ovf","vmax","vmin","vavg","flk","fi","pst","svm","pst10","pst10w","freq","zcode","zone",
 //        "cls":{"run","win","tot","m","freq"[,"res"]},"wmin":[...],"wmax":[...],"spec":[...]}
 static char jsonBuf[12 * 1024];
 
@@ -546,13 +582,16 @@ static size_t buildJson(const FlickerSnapshot *s)
     int n = snprintf(jsonBuf, sizeof(jsonBuf),
                      "{\"seq\":%lu,\"samples\":%lu,\"ovf\":%lu,"
                      "\"vmax\":%u,\"vmin\":%u,\"vavg\":%.1f,"
-                     "\"flk\":%.2f,\"fi\":%.3f,\"pst\":%.3f,\"freq\":%.2f,"
+                     "\"flk\":%.2f,\"fi\":%.3f,\"pst\":%.3f,"
+                     "\"svm\":%.3f,"
+                     "\"pst10\":%.3f,\"pst10w\":%lu,\"freq\":%.2f,"
                      "\"zcode\":%u,\"zone\":\"%s\","
                      "\"wmin\":[",
                      (unsigned long)s->seq, (unsigned long)s->samples,
                      (unsigned long)s->overflow,
                      (unsigned)s->vmax, (unsigned)s->vmin, s->vavg,
-                     s->flickerPercent, s->flickerIndex, s->pstLM, s->freqHz,
+                     s->flickerPercent, s->flickerIndex, s->pstLM, s->svm,
+                     s->pst10LM, (unsigned long)s->pst10Wins, s->freqHz,
                      (unsigned)s->zone, zone);
 
     for (int i = 0; i < WEB_WAVE_POINTS && n < (int)sizeof(jsonBuf) - 16; i++)
@@ -574,17 +613,23 @@ static size_t buildJson(const FlickerSnapshot *s)
                   "],\"cls\":{\"run\":%u,\"win\":%lu,\"tot\":%u,\"m\":%.2f,\"freq\":%.2f",
                   (unsigned)classroomIsRunning(),
                   (unsigned long)classroomWindowsDone(),
-                  (unsigned)CLS_WINDOWS, s->flickerPercent, s->freqHz);
+                  (unsigned)classroomWindowsTarget(), s->flickerPercent, s->freqHz);
     ClassroomRecord cr;
     if (classroomPopResult(&cr))
     {
         char lb[80];
         jsonEscape(lb, sizeof(lb), cr.label);
+        char sv[40];
+        if (cr.svmMean > 0.0f)
+            snprintf(sv, sizeof(sv), ",\"s\":%.3f,\"sx\":%.3f", cr.svmMean, cr.svmMax);
+        else
+            sv[0] = 0;
         n += snprintf(jsonBuf + n, sizeof(jsonBuf) - n,
                       ",\"res\":{\"lb\":\"%s\",\"m\":%.2f,\"mx\":%.2f,\"fi\":%.3f,"
-                      "\"p\":%.3f,\"px\":%.3f,\"f\":%.2f,\"v\":%u,\"ts\":%lu}",
+                      "\"p\":%.3f,\"px\":%.3f,\"f\":%.2f,\"v\":%u,\"ts\":%lu,\"w\":%u%s}",
                       lb, cr.mMean, cr.mMax, cr.fi, cr.pstMean, cr.pstMax,
-                      cr.freq, (unsigned)cr.verdict, (unsigned long)cr.ts);
+                      cr.freq, (unsigned)cr.verdict, (unsigned long)cr.ts,
+                      (unsigned)cr.windows, sv);
     }
 
     n += snprintf(jsonBuf + n, sizeof(jsonBuf) - n, "}}");
