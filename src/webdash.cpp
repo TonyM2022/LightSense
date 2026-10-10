@@ -79,7 +79,7 @@ canvas{width:100%;height:180px;display:block}
   <div class="card"><div class="label">Pst<sup>LM</sup> (1s 平滑)</div><div class="value"><span id="pst">--</span></div><div class="meta" style="margin-top:4px">10min: <span id="pst10">--</span> <span id="pst10w"></span></div></div>
   <div class="card"><div class="label">SVM (频闪可见度)</div><div class="value"><span id="svm">--</span></div><div class="meta" style="margin-top:4px">限值: ≤0.4 (EU 2024) / ≤1 可见阈</div></div>
   <div class="card"><div class="label">主频</div><div class="value"><span id="freq">--</span><small>Hz</small></div></div>
-  <div class="card"><div class="label">综合判定 (GB + Pst^LM)</div><div class="value" id="zone">--</div></div>
+  <div class="card"><div class="label">综合判定 (Pst^LM + SVM)</div><div class="value" id="zone">--</div><div class="meta" style="margin-top:4px">限值: Pst^LM ≤ 1 / SVM ≤ 0.4</div></div>
 </div>
 <div class="card wide"><div class="label">时域波形 (末块包络, 204.8 ms, ADC 码)</div><canvas id="wave"></canvas></div>
 <div class="card wide"><div class="label">频谱 (窗口平均, 对数轴 4.9 Hz ~ 5 kHz)</div><canvas id="spec"></canvas></div>
@@ -120,7 +120,7 @@ canvas{width:100%;height:180px;display:block}
     <div class="meta" id="clsstat">待机 · 时长可选 30 s / 1 min / 10 min</div>
   </div>
   <div class="card wide">
-    <div class="label">最近结果 (GB 40070-2021 + Pst^LM ≤ 1)</div>
+    <div class="label">最近结果 (Pst^LM ≤ 1 + SVM ≤ 0.4)</div>
     <div class="value" id="clsv">--</div>
     <div class="cards" style="margin:10px 0 0">
       <div><div class="label">波动深度 均值</div><div class="value" style="font-size:18px"><span id="clsm">--</span><small>%</small></div></div>
@@ -144,7 +144,7 @@ canvas{width:100%;height:180px;display:block}
   </div>
   <div class="card wide">
     <div class="label">说明与局限</div>
-    <div class="meta">判定口径: 波动深度取本次测量均值 vs 国标表4 限值 (按主频), Pst^LM 取本次测量均值 ≤ 1。局限: ① 单测点只反映测点位置光照, 教室验收应多点测量 (中心+四角) 并用标签区分; ② 30s/1min 档 Pst^LM 为短时估计, 标准口径 10min (可选 10min 档); ③ 4.88Hz 频率分辨率, &lt;15Hz 主频精度有限; ④ 波动深度 &lt;1% 视为噪声直接判合规; ⑤ SVM (80~2000 Hz 频闪可见度, IEC TR 63158) 仅记录展示不参与 GB 判定, 旧版本记录无 SVM 显示 --。</div>
+    <div class="meta">判定口径 (v0.9): Pst^LM 取本次测量均值 ≤ 1 (IEC TR 61547-1), SVM 取本次测量均值 ≤ 0.4 (IEC TR 63158, EU 2024 生态设计限值); 波动深度与主频仅展示不判定。局限: ① 单测点只反映测点位置光照, 教室验收应多点测量 (中心+四角) 并用标签区分; ② 30s/1min 档 Pst^LM 为短时估计, 标准口径 10min (可选 10min 档); ③ 4.88Hz 频率分辨率, &lt;15Hz 主频精度有限; ④ 旧版本记录为旧口径判定或无 SVM, 建议清空重测。</div>
   </div>
 </section>
 <script>
@@ -190,8 +190,8 @@ async function refreshMode(){
 buildLed();refreshMode();
 
 // ---------------- 教室测量 ----------------
-const VNAME={0:'合规 PASS',1:'超标 · 波动深度',2:'超标 · Pst^LM',3:'超标 · 双项',4:'高频豁免'};
-const VCLS={0:'z-pass',1:'z-fail',2:'z-fail',3:'z-fail',4:'z-exempt'};
+const VNAME={0:'合规 PASS',1:'超标 · 波动深度',2:'超标 · Pst^LM',3:'超标 · 双项',4:'高频豁免',5:'超标 · SVM'};
+const VCLS={0:'z-pass',1:'z-fail',2:'z-fail',3:'z-fail',4:'z-exempt',5:'z-fail'};
 const durName=w=>w>=586?'10min':(w>=58?'1min':'30s');
 let clsList=[];
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
@@ -302,7 +302,7 @@ function render(d){
   lastFreq=d.freq;
   const z=$('zone');
   z.textContent=VNAME[d.zcode]||d.zone;
-  z.className='value '+(d.zcode>=1&&d.zcode<=3?'z-fail':d.zcode===4?'z-exempt':'z-pass');
+  z.className='value '+(VCLS[d.zcode]||'z-pass');
   drawWave(d.wmin,d.wmax);
   drawSpec(d.spec);
   $('meta').textContent='窗口 #'+d.seq+' · '+d.samples+' 样本 · DMA 溢出 '+d.ovf+
@@ -576,7 +576,7 @@ static char jsonBuf[12 * 1024];
 
 static size_t buildJson(const FlickerSnapshot *s)
 {
-    static const char *zoneNames[] = {"PASS", "FAIL-M", "FAIL-PST", "FAIL-BOTH", "EXEMPT"};
+    static const char *zoneNames[] = {"PASS", "FAIL-M", "FAIL-PST", "FAIL-BOTH", "EXEMPT", "FAIL-SVM"};
     const char *zone = zoneNames[s->zone];
 
     int n = snprintf(jsonBuf, sizeof(jsonBuf),

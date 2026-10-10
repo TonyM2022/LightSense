@@ -1,8 +1,7 @@
 #pragma once
 // ---------------- 教室灯光测量层 ----------------
 // 多灯具依次测量: 时长可选 30s / 1min / 10min 档, 逐窗口聚合指标,
-// 按 GB 40070-2021 判定 (波动深度均值 vs 表4 限值 + Pst^LM 均值 ≤ 1),
-// SVM 均值/峰值仅记录展示, 不参与判定;
+// 判定 (v0.9): Pst^LM 均值 ≤ 1 + SVM 均值 ≤ 0.4 (波动深度/主频仅展示不判定);
 // 记录 NVS 持久化, 断电不丢
 #include <stdint.h>
 #include "flicker.h"
@@ -21,9 +20,9 @@ typedef struct {
     float    pstMean;            // Pst^LM 均值 (判定用)
     float    pstMax;             // Pst^LM 峰值 (展示用)
     float    freq;               // 主频 Hz (取频谱能量最大窗口)
-    uint8_t  verdict;            // FV_* 综合判定码 (flicker.h, 与频闪仪页一致)
+    uint8_t  verdict;            // FV_* 综合判定码 (v0.9: Pst^LM+SVM 口径; 旧记录为旧口径)
     uint16_t windows;            // 测量窗口数 (v0.7.1 旧记录无此字段, 读到的填充字节恒 0, 载入时补 30s 档)
-    float    svmMean;            // SVM 均值 (仅展示, 不参与 GB 判定; 旧记录为 0 → 网页显示 --)
+    float    svmMean;            // SVM 均值 (判定用 ≤0.4; 旧记录为 0 → 网页显示 --)
     float    svmMax;             // SVM 峰值 (仅展示)
 } ClassroomRecord;
 

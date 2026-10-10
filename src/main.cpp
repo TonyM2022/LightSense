@@ -10,10 +10,9 @@
       Samples / Max / Min / Average / Flicker % / Flicker Index / Pst(LM) / SVM / Pst(10min) / Flicker Frequency / Zone
       - Flicker %    : 相对峰谷幅度 (IEEE 1789 Percent Flicker = 国标波动深度)
       - Flicker Index: 均值以上面积/总面积 (IEEE 1789, 时域)
-      - Zone         : 综合判定 (GB 40070-2021 波动深度 + Pst^LM ≤ 1, 与教室测量同口径)
-                       限值: 0.1% (f<=10) | 0.01f (10~90) | 0.032f (90~3125) | 豁免 (>3125)
-                       结果: PASS=合规 FAIL-M=波动深度超标 FAIL-PST=Pst超标
-                             FAIL-BOTH=双项超标 EXEMPT=高频豁免; m<1% 视为噪声直接 PASS
+      - Zone         : 综合判定 (v0.9: Pst^LM ≤ 1 + SVM ≤ 0.4, 与教室测量同口径; 波动深度/主频仅展示)
+                       结果: PASS=合规 FAIL-PST=Pst超标 FAIL-SVM=SVM超标
+                             FAIL-BOTH=双项超标 (FAIL-M/EXEMPT 仅旧记录显示)
       - Pst (LM)     : IEC TR 61547-1 短时闪烁严重度谱估计
                        Pst = sqrt(Σ (m_k·H(f_k))²), m_k=2|X_k|/|X_DC| (相对平均光水平),
                        H = 1/可见阈值 (IEC 61000-4-15 Table 2, 0.25% @8.8Hz → Pst=1),
@@ -28,8 +27,8 @@
       - 网页 LED 控制页切换, 与测量互不干扰 (可照射自测)
   6. 教室灯光测量 (classroom 层):
       - 多灯具依次测量, 时长可选 30s / 1min / 10min (29/58/586 窗口), 可打标签
-      - 聚合: 波动深度均值/峰值, Flicker Index, Pst^LM 均值/峰值, SVM 均值/峰值 (仅记录), 主频
-      - 判定: 波动深度均值 vs GB 40070 表4 限值 + Pst^LM 均值 ≤ 1
+      - 聚合: 波动深度均值/峰值 (仅展示), Flicker Index, Pst^LM 均值/峰值, SVM 均值/峰值, 主频 (仅展示)
+      - 判定 (v0.9): Pst^LM 均值 ≤ 1 + SVM 均值 ≤ 0.4
       - 记录 NVS 持久化, 网页可导出 CSV
 
   说明:
@@ -42,7 +41,7 @@
   - adc_dma.*  : 驱动层 (ADC DMA 初始化, 整块读取, TYPE2 帧解析, 诊断)
   - led_pwm.*  : 驱动层 (LEDC PWM 输出, 模式切换)
   - flicker.*  : 度量层 (窗口统计, FFT, 指标计算, 报告输出, 网页快照)
-  - classroom.*: 度量层扩展 (教室多灯具测量 30s/1min/10min, GB 判定, NVS 记录)
+  - classroom.*: 度量层扩展 (教室多灯具测量 30s/1min/10min, Pst+SVM 判定, NVS 记录)
   - webdash.*  : 网页层 (AP 热点, Web 服务器, WebSocket JSON 推送, 控制路由)
   - main.cpp   : 编排 (setup/loop)
 */

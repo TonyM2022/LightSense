@@ -1,10 +1,10 @@
 // ---------------- 教室灯光测量层实现 ----------------
-// 聚合口径 (用户确认):
-//   波动深度: 全部窗口均值判定 (峰值仅展示), <1% 视为噪声 PASS
+// 聚合口径 (v0.9 判定切换):
 //   Pst^LM  : 全部窗口均值判定 ≤ 1 (峰值仅展示)
-//   主频    : 取频谱能量最大窗口的主频
+//   SVM     : 全部窗口均值判定 ≤ 0.4 (峰值仅展示)
+//   波动深度: 全部窗口均值, 仅展示不判定
+//   主频    : 取频谱能量最大窗口的主频, 仅展示
 // 时长档位: 30s (29 窗) / 1min (58 窗) / 10min (586 窗), 网页选择
-// SVM: 逐窗口聚合均值/峰值, 仅展示, 不参与 flickerVerdict 判定
 // 存储: NVS namespace "cls", 键 cnt + r0..rN-1. 记录 blob 三代:
 //   v0.7.1 64B (无 windows/svm) / 中间版 64B (仅 windows) / 当前版 72B (windows + svm),
 //   按 blob 长度识别; 64B 旧记录 windows==0 (v0.7.1 填充字节恒 0) 补 30s 档, SVM 补 0 (网页显示 --)
@@ -172,7 +172,7 @@ bool classroomOnWindow(const FlickerSnapshot *s)
     r.svmMean = accSvm / (float)runTarget;
     r.svmMax  = accSvmMax;
     r.freq    = bestFreq;
-    r.verdict = flickerVerdict(r.freq, r.mMean, r.pstMean);
+    r.verdict = flickerVerdict(r.pstMean, r.svmMean);
 
     recs[recCount++] = r;
     nvsSaveRecord(recCount - 1);

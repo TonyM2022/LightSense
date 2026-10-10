@@ -7,9 +7,8 @@
 //                  显示值经跨窗 EMA 频谱平滑 (≈8s, 周期分量无损), 抑制噪声读数抖动
 //   Pst 10min    : 滚动 586 窗能量 (Pst²) 均值开方, 标准 10min 观察窗口径结论值
 //   SVM          : IEC TR 63158 频闪可见度 SVM = (Σ (C_m/T(f_m))^3.7)^(1/3.7), 80~2000 Hz
-//                  T(f) = 2.865e-5·f^1.543 + 0.225 (50% 人群可见阈); 同一经 EMA 频谱平滑,
-//                  不并入综合判定 (GB 40070 无 SVM 口径), 仅显示/教室记录
-//   Freq / Zone  : FFT 主频 + 综合判定 (GB 40070 波动深度 + Pst^LM ≤ 1)
+//                  T(f) = 2.865e-5·f^1.543 + 0.225 (50% 人群可见阈); 同一经 EMA 频谱平滑
+//   Freq / Zone  : FFT 主频 (仅展示) + 综合判定 (Pst^LM ≤ 1 + SVM ≤ 0.4, v0.9 起; 波动深度仅展示)
 // 网页快照: 每个报告窗口填充最新波形包络/平均频谱/指标, 供 webdash 层推送
 #include <Arduino.h>
 #include <arduinoFFT.h>
@@ -157,26 +156,17 @@ static float svmFromSpectrum(const float *spec, float dcRef)
     return (s > 0.0f) ? powf(s, 1.0f / 3.7f) : 0.0f;
 }
 
-// ---------------- 综合判定 (GB 40070-2021 + Pst^LM) ----------------
-// 与教室测量同一口径: 波动深度 vs 表4 限值 (按主频) + Pst^LM ≤ 1,
-// m<1% 视为噪声直接合规; >3125 Hz 豁免波动深度考核 (Pst 仍判)
-uint8_t flickerVerdict(float freq, float m, float pst)
+// ---------------- 综合判定 (Pst^LM + SVM, v0.9) ----------------
+// 与教室测量同一口径: Pst^LM ≤ 1 (IEC TR 61547-1) + SVM ≤ 0.4 (IEC TR 63158 / EU 2024);
+// 波动深度与主频仅展示不判定; 判定入参为平滑后显示值 (教室侧为全窗均值)
+uint8_t flickerVerdict(float pst, float svm)
 {
-    if (m < 1.0f)
-        return FV_PASS;                 // 噪声门限
-
     bool pstOK = (pst <= 1.0f);
-    if (freq > 3125.0f)
-        return pstOK ? FV_EXEMPT : FV_FAIL_PST;
+    bool svmOK = (svm <= 0.4f);
 
-    float limit = (freq <= 10.0f)  ? 0.1f
-                : (freq <= 90.0f)  ? 0.01f  * freq
-                :                    0.032f * freq;
-    bool mOK = (m <= limit);
-
-    if (mOK && pstOK)   return FV_PASS;
-    if (!mOK && pstOK)  return FV_FAIL_M;
-    if (mOK && !pstOK)  return FV_FAIL_PST;
+    if (pstOK && svmOK)  return FV_PASS;
+    if (!pstOK && svmOK) return FV_FAIL_PST;
+    if (pstOK && !svmOK) return FV_FAIL_SVM;
     return FV_FAIL_BOTH;
 }
 
@@ -403,10 +393,10 @@ void flickerReport(uint32_t overflow)
     Serial.print(freq, 2);
     Serial.println(" Hz");
 
-    // 综合判定: GB 40070-2021 波动深度 + Pst^LM ≤ 1 (与教室测量口径一致)
-    snap.zone = flickerVerdict(freq, flickerPercent, pstDisp);
-    static const char *const zoneStr[] = {"PASS", "FAIL-M", "FAIL-PST", "FAIL-BOTH", "EXEMPT"};
-    Serial.print("Zone     : GB+Pst ");
+    // 综合判定: Pst^LM ≤ 1 + SVM ≤ 0.4 (v0.9, 与教室测量口径一致)
+    snap.zone = flickerVerdict(pstDisp, svmDisp);
+    static const char *const zoneStr[] = {"PASS", "FAIL-M", "FAIL-PST", "FAIL-BOTH", "EXEMPT", "FAIL-SVM"};
+    Serial.print("Zone     : Pst+SVM ");
     Serial.println(zoneStr[snap.zone]);
 
     if (overflow > 0)

@@ -4,16 +4,17 @@
 #include <stdint.h>
 #include "config.h"
 
-// 综合判定码: GB 40070-2021 波动深度 + Pst^LM ≤ 1 (频闪仪页与教室测量共用)
-#define FV_PASS            0    // 合规 (含波动深度 <1% 的噪声)
-#define FV_FAIL_M          1    // 超标: 波动深度
+// 综合判定码: Pst^LM ≤ 1 + SVM ≤ 0.4 (v0.9 起, 频闪仪页与教室测量共用)
+#define FV_PASS            0    // 合规
+#define FV_FAIL_M          1    // 超标: 波动深度 (仅旧记录, v0.8 及以前口径, 新逻辑不产出)
 #define FV_FAIL_PST        2    // 超标: Pst^LM > 1
-#define FV_FAIL_BOTH       3    // 超标: 波动深度 + Pst^LM
-#define FV_EXEMPT          4    // 高频豁免 (>3125 Hz)
+#define FV_FAIL_BOTH       3    // 超标: Pst^LM + SVM 双超
+#define FV_EXEMPT          4    // 高频豁免 (仅旧记录, 新逻辑不产出)
+#define FV_FAIL_SVM        5    // 超标: SVM > 0.4
 
-// 综合判定: 波动深度 vs GB 40070 表4 限值 (按主频) + Pst^LM ≤ 1
-// m<1% 视为噪声直接判合规; >3125 Hz 豁免波动深度考核 (Pst 仍判)
-uint8_t flickerVerdict(float freq, float m, float pst);
+// 综合判定: Pst^LM ≤ 1 (IEC TR 61547-1) + SVM ≤ 0.4 (IEC TR 63158 / EU 2024)
+// 波动深度与主频仅展示不判定; 码值 1/4 保留旧记录兼容
+uint8_t flickerVerdict(float pst, float svm);
 
 // 累积 10min Pst^LM 结论值: 滚动缓冲 586 个报告窗 (586 × 1.024s ≈ 600s)
 #define PST10_WINDOWS       586
