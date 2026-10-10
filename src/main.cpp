@@ -7,7 +7,7 @@
       - 缓存   : 4096 点/块
   2. FFT 频谱分析 (arduinoFFT 库, 4096 点, Hann 窗, 去直流, 峰值插值提频)
   3. 串口输出统计 (每 5 块 ≈ 1.024 s 一次):
-      Samples / Max / Min / Average / Flicker % / Flicker Index / Pst(LM) / SVM / Pst(10min) / Flicker Frequency / Zone
+      Samples / Max / Min / Average / Flicker % / Flicker Index / Pst(LM) / SVM / Flicker Frequency / Zone
       - Flicker %    : 相对峰谷幅度 (IEEE 1789 Percent Flicker = 国标波动深度)
       - Flicker Index: 均值以上面积/总面积 (IEEE 1789, 时域)
       - Zone         : 综合判定 (v0.9: Pst^LM ≤ 1 + SVM ≤ 0.4, 与教室测量同口径; 波动深度/主频仅展示)

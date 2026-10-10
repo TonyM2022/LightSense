@@ -16,9 +16,6 @@
 // 波动深度与主频仅展示不判定; 码值 1/4 保留旧记录兼容
 uint8_t flickerVerdict(float pst, float svm);
 
-// 累积 10min Pst^LM 结论值: 滚动缓冲 586 个报告窗 (586 × 1.024s ≈ 600s)
-#define PST10_WINDOWS       586
-
 // 网页仪表快照: flickerReport() 在每个报告窗口结束时填充一次
 typedef struct {
     uint32_t seq;                  // 快照序号 (窗口计数, 从 1 开始)
@@ -29,10 +26,8 @@ typedef struct {
     float    vavg;                 // 均值
     float    flickerPercent;       // 波动深度 % (Percent Flicker)
     float    flickerIndex;         // Flicker Index
-    float    pstLM;                // Pst (LM), 1s 窗值 (跨窗 EMA 频谱平滑 ≈8s, 抗噪抖)
-    float    pst10LM;              // 累积 10min Pst^LM (滚动 PST10_WINDOWS 窗能量均值开方)
-    uint32_t pst10Wins;            // 已累积窗口数 (达 PST10_WINDOWS 后为标准 10min 结论值)
-    float    svm;                  // SVM 频闪可见度 (IEC TR 63158, 80~2000 Hz, 1s 窗值 EMA 频谱平滑)
+    float    pstLM;                // Pst (LM), 1s 窗值 (无平滑)
+    float    svm;                  // SVM 频闪可见度 (IEC TR 63158, 80~2000 Hz, 1s 窗值)
     float    freqHz;               // FFT 主频 Hz
     uint8_t  zone;                 // FV_* 综合判定码
     float    wmin[WEB_WAVE_POINTS];   // 末块波形包络: 每段最小值

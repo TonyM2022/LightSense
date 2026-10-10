@@ -4,10 +4,8 @@
 //   Flicker Index: 均值以上面积/总面积 (IEEE 1789, 时域)
 //   Pst (LM)     : IEC TR 61547-1 谱估计 Pst = sqrt(Σ (m_k·H(f_k))²)
 //                  m_k = 2|X_k|/|X_DC| (相对平均光水平), H = 1/可见阈值, 加权 4.9~80 Hz
-//                  显示值经跨窗 EMA 频谱平滑 (≈8s, 周期分量无损), 抑制噪声读数抖动
-//   Pst 10min    : 滚动 586 窗能量 (Pst²) 均值开方, 标准 10min 观察窗口径结论值
 //   SVM          : IEC TR 63158 频闪可见度 SVM = (Σ (C_m/T(f_m))^3.7)^(1/3.7), 80~2000 Hz
-//                  T(f) = 2.865e-5·f^1.543 + 0.225 (50% 人群可见阈); 同一经 EMA 频谱平滑
+//                  T(f) = 2.865e-5·f^1.543 + 0.225 (50% 人群可见阈)
 //   Freq / Zone  : FFT 主频 (仅展示) + 综合判定 (Pst^LM ≤ 1 + SVM ≤ 0.4, v0.9 起; 波动深度仅展示)
 // 网页快照: 每个报告窗口填充最新波形包络/平均频谱/指标, 供 webdash 层推送
 #include <Arduino.h>
@@ -28,18 +26,6 @@ static uint32_t winSum = 0;                                // 窗口内总和
 static uint32_t winCount = 0;                              // 窗口内样本数
 static float winAboveMean = 0.0f;                          // 均值以上面积和 (Flicker Index)
 static uint8_t winBlocks = 0;                              // 窗口内已处理块数 (频谱平均)
-
-// 滚动 10min Pst^LM 累积: 每报告窗存能量 E = pstLM², 结论值 = sqrt(能量均值)
-// (等效对整个 10min 观察窗做能量平均, 平滑单窗瞬时值的跳动)
-static float pstRing[PST10_WINDOWS];                       // 每窗能量环形缓冲 (~2.3KB)
-static uint16_t pst10Idx = 0;                              // 环形写指针
-static uint32_t pst10Count = 0;                            // 已累积窗口数 (0~PST10_WINDOWS)
-
-// 跨窗频谱平滑 (bins 1..SVM_BIN_MAX, 覆盖 Pst 与 SVM 两个频段): EMA 系数 1/8 ≈ 8s 时间常数,
-// 周期调制分量 (相干平均) 不受影响, 噪声估计方差降 ~8 倍 → 1s 读数抖动约降 65%
-#define PST_SMOOTH_SHIFT 3
-static float specSmooth[SVM_BIN_MAX + 1];                  // 平滑频谱 (bin 0 未用)
-static bool  specSmoothInit = false;                       // 上电首窗直接载入
 
 // 末块波形包络: 每 WAVE_SEG 点取 min/max (4096 点 → WEB_WAVE_POINTS 段)
 #define WAVE_SEG (FFT_SIZE / WEB_WAVE_POINTS)
@@ -304,53 +290,18 @@ void flickerReport(uint32_t overflow)
     // m_i = 2·|X_i|/|X_DC| 为相对平均光水平的调制分量幅度, H 为人眼加权曲线
     // DC 基准取窗口实测均值 (块内已 dcRemoval, FFT bin0 只剩泄漏不能作基准);
     // Hann 窗对直流的等效幅度 |X_DC| = DC·Σw ≈ DC·N/2
-    // raw  : 本窗频谱直接计算 → 存入 10min 能量累积 (保持逐窗口径)
-    // disp : 跨窗 EMA 平滑频谱计算 → 显示/推送 (抗噪抖, 周期分量无损)
-    // SVM  : 同一 dcRef/同一平滑频谱, 频段与权重不同, 同样 raw(备用)/disp(显示)
-    float pstRaw = 0.0f;
-    float pstDisp = 0.0f;
-    float svmRaw = 0.0f;
-    float svmDisp = 0.0f;
+    // SVM: 同一 dcRef 同一频谱, 频段与权重不同 (80~2000 Hz, IEC TR 63158)
+    float pst = 0.0f;
+    float svm = 0.0f;
     if (winCount > 0)
     {
         float dcRef = ((float)winSum / (float)winCount) *
                       ((float)FFT_SIZE * 0.5f);
         if (dcRef > 0.0f)
         {
-            pstRaw = pstFromSpectrum(specAccum, dcRef);
-            svmRaw = svmFromSpectrum(specAccum, dcRef);
-
-            if (!specSmoothInit)
-            {
-                for (uint32_t k = 1; k <= SVM_BIN_MAX; k++)
-                    specSmooth[k] = specAccum[k];
-                specSmoothInit = true;
-            }
-            else
-            {
-                for (uint32_t k = 1; k <= SVM_BIN_MAX; k++)
-                    specSmooth[k] += (specAccum[k] - specSmooth[k]) *
-                                     (1.0f / (float)(1 << PST_SMOOTH_SHIFT));
-            }
-            pstDisp = pstFromSpectrum(specSmooth, dcRef);
-            svmDisp = svmFromSpectrum(specSmooth, dcRef);
-            (void)svmRaw;                // SVM 无 10min 累积口径, raw 仅保留调试语义
+            pst = pstFromSpectrum(specAccum, dcRef);
+            svm = svmFromSpectrum(specAccum, dcRef);
         }
-    }
-
-    // 累积 10min Pst^LM: 本窗原始能量存入环形缓冲, 全体均值开方
-    pstRing[pst10Idx] = pstRaw * pstRaw;
-    if (++pst10Idx >= PST10_WINDOWS)
-        pst10Idx = 0;
-    if (pst10Count < PST10_WINDOWS)
-        pst10Count++;
-    float pst10 = 0.0f;
-    if (pst10Count > 0)
-    {
-        float e10 = 0.0f;
-        for (uint32_t i = 0; i < pst10Count; i++)
-            e10 += pstRing[i];
-        pst10 = sqrtf(e10 / (float)pst10Count);
     }
 
     Serial.println();
@@ -376,25 +327,17 @@ void flickerReport(uint32_t overflow)
     Serial.println(flickerIndex, 3);
 
     Serial.print("Pst (LM) : ");
-    Serial.println(pstDisp, 3);
-
-    Serial.print("Pst 10min: ");
-    Serial.print(pst10, 3);
-    Serial.print("  (");
-    Serial.print(pst10Count);
-    Serial.print("/");
-    Serial.print(PST10_WINDOWS);
-    Serial.println(" win)");
+    Serial.println(pst, 3);
 
     Serial.print("SVM      : ");
-    Serial.println(svmDisp, 3);
+    Serial.println(svm, 3);
 
     Serial.print("Freq     : ");
     Serial.print(freq, 2);
     Serial.println(" Hz");
 
     // 综合判定: Pst^LM ≤ 1 + SVM ≤ 0.4 (v0.9, 与教室测量口径一致)
-    snap.zone = flickerVerdict(pstDisp, svmDisp);
+    snap.zone = flickerVerdict(pst, svm);
     static const char *const zoneStr[] = {"PASS", "FAIL-M", "FAIL-PST", "FAIL-BOTH", "EXEMPT", "FAIL-SVM"};
     Serial.print("Zone     : Pst+SVM ");
     Serial.println(zoneStr[snap.zone]);
@@ -417,10 +360,8 @@ void flickerReport(uint32_t overflow)
     snap.vavg = (float)winSum / (float)winCount;
     snap.flickerPercent = flickerPercent;
     snap.flickerIndex = flickerIndex;
-    snap.pstLM = pstDisp;
-    snap.pst10LM = pst10;
-    snap.pst10Wins = pst10Count;
-    snap.svm = svmDisp;
+    snap.pstLM = pst;
+    snap.svm = svm;
     snap.freqHz = freq;
     for (uint32_t g = 0; g < WEB_WAVE_POINTS; g++)
     {

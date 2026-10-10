@@ -76,7 +76,7 @@ canvas{width:100%;height:180px;display:block}
 <div class="cards">
   <div class="card"><div class="label">波动深度 (Percent Flicker)</div><div class="value"><span id="flk">--</span><small>%</small></div></div>
   <div class="card"><div class="label">Flicker Index</div><div class="value"><span id="fi">--</span></div></div>
-  <div class="card"><div class="label">Pst<sup>LM</sup> (1s 平滑)</div><div class="value"><span id="pst">--</span></div><div class="meta" style="margin-top:4px">10min: <span id="pst10">--</span> <span id="pst10w"></span></div></div>
+  <div class="card"><div class="label">Pst<sup>LM</sup> (1s 窗值)</div><div class="value"><span id="pst">--</span></div></div>
   <div class="card"><div class="label">SVM (频闪可见度)</div><div class="value"><span id="svm">--</span></div><div class="meta" style="margin-top:4px">限值: ≤0.4 (EU 2024) / ≤1 可见阈</div></div>
   <div class="card"><div class="label">主频</div><div class="value"><span id="freq">--</span><small>Hz</small></div></div>
   <div class="card"><div class="label">综合判定 (Pst^LM + SVM)</div><div class="value" id="zone">--</div><div class="meta" style="margin-top:4px">限值: Pst^LM ≤ 1 / SVM ≤ 0.4</div></div>
@@ -291,9 +291,6 @@ function render(d){
   $('flk').textContent=d.flk.toFixed(2);
   $('fi').textContent=d.fi.toFixed(3);
   $('pst').textContent=d.pst.toFixed(3);
-  $('pst10').textContent=(d.pst10||0).toFixed(3);
-  const pmn=(d.pst10w||0)*1.024/60;
-  $('pst10w').textContent=pmn>=10?'(满 10min)':'(累积 '+pmn.toFixed(1)+' min)';
   $('svm').textContent=(d.svm||0).toFixed(3);
   $('freq').textContent=d.freq.toFixed(2);
   $('vmax').textContent=d.vmax;
@@ -570,7 +567,7 @@ bool webdashBegin(void)
 }
 
 // ---------------- JSON 快照构建 ----------------
-// 格式: {"seq","samples","ovf","vmax","vmin","vavg","flk","fi","pst","svm","pst10","pst10w","freq","zcode","zone",
+// 格式: {"seq","samples","ovf","vmax","vmin","vavg","flk","fi","pst","svm","freq","zcode","zone",
 //        "cls":{"run","win","tot","m","freq"[,"res"]},"wmin":[...],"wmax":[...],"spec":[...]}
 static char jsonBuf[12 * 1024];
 
@@ -583,15 +580,14 @@ static size_t buildJson(const FlickerSnapshot *s)
                      "{\"seq\":%lu,\"samples\":%lu,\"ovf\":%lu,"
                      "\"vmax\":%u,\"vmin\":%u,\"vavg\":%.1f,"
                      "\"flk\":%.2f,\"fi\":%.3f,\"pst\":%.3f,"
-                     "\"svm\":%.3f,"
-                     "\"pst10\":%.3f,\"pst10w\":%lu,\"freq\":%.2f,"
+                     "\"svm\":%.3f,\"freq\":%.2f,"
                      "\"zcode\":%u,\"zone\":\"%s\","
                      "\"wmin\":[",
                      (unsigned long)s->seq, (unsigned long)s->samples,
                      (unsigned long)s->overflow,
                      (unsigned)s->vmax, (unsigned)s->vmin, s->vavg,
                      s->flickerPercent, s->flickerIndex, s->pstLM, s->svm,
-                     s->pst10LM, (unsigned long)s->pst10Wins, s->freqHz,
+                     s->freqHz,
                      (unsigned)s->zone, zone);
 
     for (int i = 0; i < WEB_WAVE_POINTS && n < (int)sizeof(jsonBuf) - 16; i++)
