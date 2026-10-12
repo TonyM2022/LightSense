@@ -20,6 +20,7 @@ LED 标准闪烁源与教室灯光测量记录功能。
 | WiFi 网页仪表 | 设备开 AP 热点，浏览器实时查看指标/波形/频谱，WebSocket 每窗口推送 |
 | LED 标准闪烁源 | 板载外接 LED 输出 常亮/50/100/500/1000/5000 Hz 方波（占空比 50%），闭环自测 |
 | 教室灯光测量 | 30 s / 1 min / 10 min 三档时长，多灯具打标签依次测量，NVS 断电保存 50 条，CSV 导出 |
+| OLED 本地显示 | 1.54" SSD1309 IIC（板载 SDA/SCL），主页显示综合判定与主要指标摘要，教室测量自动切换进度页，未接模块自动禁用 |
 
 ## 硬件结构
 
@@ -40,6 +41,7 @@ LED 标准闪烁源与教室灯光测量记录功能。
 |---|---|---|
 | GPIO1 (ADC1_CH0) | 光信号输入 | 12 bit（0~4095），12 dB 衰减（满量程约 3.1 V）；仅 ADC1 支持 DMA 连续模式 |
 | GPIO21 (D8) | LED 闪烁源输出 | LEDC 硬件 PWM，10 bit 分辨率；经 220~330 Ω 限流电阻接 LED |
+| GPIO4 / GPIO5 | OLED I2C SDA / SCL | 板载丝印 SDA/SCL；接 1.54" OLED（SSD1309，3.3 V 供电），未接自动禁用 |
 | WiFi AP | 网页仪表 | SSID `LightSense`，密码 `lightsense`（见 `src/config.h` 可改） |
 | USB 串口 | 调试输出 | 115200 bps，每报告窗口（≈1.024 s）输出一次统计 |
 
@@ -57,11 +59,12 @@ LED 标准闪烁源与教室灯光测量记录功能。
 ```
 main.cpp (编排层)
   │  初始化各层; 主循环: 取 DMA 块 → flickerProcessBlock()
-  │  → 报告窗口到 → flickerReport() → classroomOnWindow() → webdashLoop()
+  │  → 报告窗口到 → flickerReport() → classroomOnWindow() → oledShow() → webdashLoop()
   ▼
 ┌──────────────────────────────────────────────────────────────┐
 │ 驱动层    adc_dma.*   ADC DMA 连续采样 (20 ksps, 双缓冲块)      │
 │           led_pwm.*   LEDC PWM 标准闪烁源 (7 种模式)            │
+│           oled.*      OLED 本地显示 (主页/教室页)               │
 ├──────────────────────────────────────────────────────────────┤
 │ 度量层    flicker.*   窗口统计 + FFT + 指标计算 + 综合判定       │
 │                       (flickerReport 每 5 块 ≈ 1.024 s 输出一次,│
@@ -140,6 +143,7 @@ LightSense/
 │   ├── flicker.h/.cpp    # 度量层: 窗口统计 + FFT 频谱 + Pst/SVM 计算 + 综合判定
 │   ├── classroom.h/.cpp  # 应用层: 教室测量聚合 + 三档时长 + NVS 记录存储
 │   ├── webdash.h/.cpp    # 网页层: AP 热点 + 异步服务器 + WebSocket + 内嵌前端
+│   ├── oled.h/.cpp       # 显示层: U8g2 SSD1309 OLED (主页/教室测量页, 纯只读)
 ├── readme.md             # 本文件
 └── .gitignore            # 忽略 .pio/ 等构建产物
 ```
@@ -156,6 +160,7 @@ LightSense/
 | `ADC_BRIGHT_LIMIT` | 3000 | 判定光照上限 |
 | `WIFI_AP_SSID` / `WIFI_AP_PASS` | LightSense / lightsense | AP 热点 |
 | `LED_PIN` | GPIO21 | LED 闪烁源输出 |
+| `OLED_SDA` / `OLED_SCL` / `OLED_ADDR` | 4 / 5 / 0x3C | OLED I2C 引脚与地址（板载丝印 SDA/SCL） |
 
 ## 使用说明
 
@@ -178,6 +183,16 @@ LightSense/
 - **教室测量**：选择时长（30 s / 1 min / 10 min）与灯具标签（留空自动编号）开始测量，
   完成后显示结果与判定，记录断电保存（最多 50 条），可导出 CSV（带 BOM，Excel 直接打开）
   或清空。教室验收建议多点测量（中心 + 四角）并用标签区分。
+
+### OLED 本地显示（可选硬件）
+
+1.54" 128×64 SSD1309 OLED 接板载 I2C（VCC→3.3 V、SDA→GPIO4、SCL→GPIO5、共地），
+每报告窗口（≈1 s）刷新一次：
+
+- **主页**：综合判定（中文大字，超标时双线框强调）+ 波动深度 / 主频 / Pst^LM / SVM /
+  光照均值 / Flicker Index 摘要；
+- **教室测量进行中**：自动切换进度页（灯具标签 + 进度条 + 剩余时间），完成后回主页；
+- 未接模块时自动禁用（串口提示 `OLED: not found`），不影响测量与网页功能。
 
 ### 串口输出示例
 
@@ -242,6 +257,7 @@ Zone     : Light+Pst+SVM FAIL-BOTH
 | v0.9 | 判定切换为 Pst^LM ≤ 1 + SVM ≤ 0.4（m/freq 仅展示） |
 | v1.0 | 移除 EMA 频谱平滑与 10min 累积 Pst 显示 |
 | v1.1 | 综合判定增加光照量程前置检查（过暗/过亮否决） |
+| v1.2 | 1.54" OLED 本地显示（判定 + 指标摘要 / 教室进度页）；切换 8MB 分区表 |
 
 ## 参考来源
 

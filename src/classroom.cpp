@@ -142,6 +142,11 @@ uint16_t classroomWindowsTarget(void)
     return runTarget;
 }
 
+const char *classroomLabel(void)
+{
+    return runLabel;
+}
+
 // ---------------- 逐窗口聚合 ----------------
 bool classroomOnWindow(const FlickerSnapshot *s)
 {

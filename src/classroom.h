@@ -43,6 +43,9 @@ uint32_t classroomWindowsDone(void);
 // 本次测量的目标窗口数
 uint16_t classroomWindowsTarget(void);
 
+// 当前测量标签 (仅测量运行中调用有意义, OLED 教室页显示用)
+const char *classroomLabel(void);
+
 // 每个报告窗口调用一次; 完成最后一次测量时返回 true (结果已入库)
 bool classroomOnWindow(const FlickerSnapshot *s);
 

@@ -34,6 +34,11 @@
               光照均值 ADC 码 (判定前置量程检查), 主频 (仅展示)
       - 判定 (v1.1): 光照量程前置否决 + Pst^LM 均值 ≤ 1 + SVM 均值 ≤ 0.4
       - 记录 NVS 持久化, 网页可导出 CSV
+  7. OLED 本地显示 (oled 层, v1.2):
+      - 1.54" 128x64 SSD1309 IIC (板载 SDA=GPIO4 / SCL=GPIO5, U8g2 全缓冲)
+      - 主页: 综合判定 + 波动深度/主频/Pst^LM/SVM/光照/Flicker Index, 每窗口刷新
+      - 教室测量进行中自动切换教室页 (标签+进度条+剩余时间), 完成后回主页
+      - 未接模块自动禁用, 不影响其他功能
 
   说明:
   - GPIO1 = ADC1_CH0, 12bit (0~4095), 11dB 衰减 (量程约 0~3.1V)
@@ -47,6 +52,7 @@
   - flicker.*  : 度量层 (窗口统计, FFT, 指标计算, 报告输出, 网页快照)
   - classroom.*: 度量层扩展 (教室多灯具测量 30s/1min/10min, Pst+SVM 判定, NVS 记录)
   - webdash.*  : 网页层 (AP 热点, Web 服务器, WebSocket JSON 推送, 控制路由)
+  - oled.*     : 显示层 (U8g2 SSD1309 IIC, 主页/教室测量页, 纯只读消费快照)
   - main.cpp   : 编排 (setup/loop)
 */
 
@@ -57,6 +63,7 @@
 #include "flicker.h"
 #include "classroom.h"
 #include "webdash.h"
+#include "oled.h"
 
 static float blockBuf[FFT_SIZE];      // 整块样本缓冲 (16KB)
 static uint32_t blockIndex = 0;       // 已处理块计数
@@ -95,6 +102,8 @@ void setup()
         Serial.println("WARN: WiFi web dashboard start failed.");
     }
 
+    oledBegin();                          // OLED 显示 (未接模块仅提示并禁用, 不影响主功能)
+
     if (!adcDmaBegin())
     {
         while (true) delay(1000);     // 初始化失败, 停机
@@ -117,6 +126,7 @@ void loop()
 
         const FlickerSnapshot *snap = flickerSnapshot();
         classroomOnWindow(snap);          // 教室测量: 逐窗口累加
+        oledShow(snap);                   // OLED 刷新 (主页/教室页, 未接模块直接返回)
         webdashBroadcast(snap);           // 推送到浏览器
     }
 }

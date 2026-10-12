@@ -29,3 +29,8 @@
 #define LED_PIN              21                   // D8 = GPIO21 → 220~330Ω → LED → GND
 #define LED_PWM_CHANNEL      0                    // LEDC 通道 0 (与 ADC/WiFi 无冲突)
 #define LED_PWM_RESOLUTION   10                   // 10bit 占空比 (1024 级, 最高支持 ~78 kHz)
+
+// ---------------- OLED 显示 (v1.2, 1.54" 128x64 SSD1309 IIC) ----------------
+#define OLED_SDA             4                    // 板载 I2C SDA (丝印 SDA)
+#define OLED_SCL             5                    // 板载 I2C SCL (丝印 SCL)
+#define OLED_ADDR            0x3C                 // I2C 地址 (个别模块 0x3D, 探测时自动尝试)
