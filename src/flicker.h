@@ -14,7 +14,7 @@
 #define FV_DARK            6    // 光线过暗 (窗口均值 ADC 码 < ADC_DARK_LIMIT, Pst/SVM 数据无效)
 #define FV_BRIGHT          7    // 光线太亮 (窗口均值 ADC 码 > ADC_BRIGHT_LIMIT, Pst/SVM 数据无效)
 
-// 综合判定: 光照量程前置否决 (vavg < 300 过暗 / > 3100 过亮, 见 config.h) +
+// 综合判定: 光照量程前置否决 (vavg < 400 过暗 / > 3000 过亮, 见 config.h) +
 //           Pst^LM ≤ 1 (IEC TR 61547-1) + SVM ≤ 0.4 (IEC TR 63158 / EU 2024)
 // 波动深度与主频仅展示不判定; 码值 1/4 保留旧记录兼容
 uint8_t flickerVerdict(float pst, float svm, float vavg);

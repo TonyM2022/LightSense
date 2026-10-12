@@ -79,7 +79,7 @@ canvas{width:100%;height:180px;display:block}
   <div class="card"><div class="label">Pst<sup>LM</sup> (1s 窗值)</div><div class="value"><span id="pst">--</span></div></div>
   <div class="card"><div class="label">SVM (频闪可见度)</div><div class="value"><span id="svm">--</span></div><div class="meta" style="margin-top:4px">限值: ≤0.4 (EU 2024) / ≤1 可见阈</div></div>
   <div class="card"><div class="label">主频</div><div class="value"><span id="freq">--</span><small>Hz</small></div></div>
-  <div class="card"><div class="label">综合判定 (光照 + Pst<sup>LM</sup> + SVM)</div><div class="value" id="zone">--</div><div class="meta" style="margin-top:4px">光照均值 300~3100 码 / Pst<sup>LM</sup> ≤ 1 / SVM ≤ 0.4</div></div>
+  <div class="card"><div class="label">综合判定 (光照 + Pst<sup>LM</sup> + SVM)</div><div class="value" id="zone">--</div><div class="meta" style="margin-top:4px">光照均值 400~3000 码 / Pst<sup>LM</sup> ≤ 1 / SVM ≤ 0.4</div></div>
 </div>
 <div class="card wide"><div class="label">时域波形 (末块包络, 204.8 ms, ADC 码)</div><canvas id="wave"></canvas></div>
 <div class="card wide"><div class="label">频谱 (窗口平均, 对数轴 4.9 Hz ~ 5 kHz)</div><canvas id="spec"></canvas></div>
@@ -145,7 +145,7 @@ canvas{width:100%;height:180px;display:block}
   </div>
   <div class="card wide">
     <div class="label">说明与局限</div>
-    <div class="meta">判定口径 (v1.1): 光照前置检查 (窗口均值 ADC 码 &lt;300 光线过暗 / &gt;3100 光线太亮, 此时 Pst/SVM 无效) → Pst^LM 取本次测量均值 ≤ 1 (IEC TR 61547-1), SVM 取本次测量均值 ≤ 0.4 (IEC TR 63158, EU 2024 生态设计限值); 波动深度与主频仅展示不判定。局限: ① 单测点只反映测点位置光照, 教室验收应多点测量 (中心+四角) 并用标签区分; ② 30s/1min 档 Pst^LM 为短时估计, 标准口径 10min (可选 10min 档); ③ 4.88Hz 频率分辨率, &lt;15Hz 主频精度有限; ④ 旧版本记录为旧口径判定或无 SVM/光照, 建议清空重测。</div>
+    <div class="meta">判定口径 (v1.1): 光照前置检查 (窗口均值 ADC 码 &lt;400 光线过暗 / &gt;3000 光线太亮, 此时 Pst/SVM 无效) → Pst^LM 取本次测量均值 ≤ 1 (IEC TR 61547-1), SVM 取本次测量均值 ≤ 0.4 (IEC TR 63158, EU 2024 生态设计限值); 波动深度与主频仅展示不判定。局限: ① 单测点只反映测点位置光照, 教室验收应多点测量 (中心+四角) 并用标签区分; ② 30s/1min 档 Pst^LM 为短时估计, 标准口径 10min (可选 10min 档); ③ 4.88Hz 频率分辨率, &lt;15Hz 主频精度有限; ④ 旧版本记录为旧口径判定或无 SVM/光照, 建议清空重测。</div>
   </div>
 </section>
 <script>

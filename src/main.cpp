@@ -14,7 +14,7 @@
                        波动深度/主频仅展示)
                        结果: PASS=合规 FAIL-PST=Pst超标 FAIL-SVM=SVM超标
                              FAIL-BOTH=双项超标 TOO-DARK=光线过暗 TOO-BRIGHT=光线太亮
-                             (窗口均值 ADC 码 <300 过暗 / >3100 过亮, 见 config.h;
+                             (窗口均值 ADC 码 <400 过暗 / >3000 过亮, 见 config.h;
                               FAIL-M/EXEMPT 仅旧记录显示)
       - Pst (LM)     : IEC TR 61547-1 短时闪烁严重度谱估计
                        Pst = sqrt(Σ (m_k·H(f_k))²), m_k=2|X_k|/|X_DC| (相对平均光水平),
