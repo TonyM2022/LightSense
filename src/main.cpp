@@ -34,11 +34,15 @@
               光照均值 ADC 码 (判定前置量程检查), 主频 (仅展示)
       - 判定 (v1.1): 光照量程前置否决 + Pst^LM 均值 ≤ 1 + SVM 均值 ≤ 0.4
       - 记录 NVS 持久化, 网页可导出 CSV
-  7. OLED 本地显示 (oled 层, v1.2):
+  7. OLED 本地显示 (oled 层, v1.2/v1.3):
       - 1.54" 128x64 SSD1309 IIC (板载 SDA=GPIO4 / SCL=GPIO5, U8g2 全缓冲)
-      - 主页: 综合判定 + 波动深度/主频/Pst^LM/SVM/光照/Flicker Index, 每窗口刷新
-      - 教室测量进行中自动切换教室页 (标签+进度条+剩余时间), 完成后回主页
-      - 未接模块自动禁用, 不影响其他功能
+      - 三页面 = 网页端三页签 (频闪仪/LED 控制/教室测量), 顶部 tab 栏
+      - 数据每报告窗口刷新; 按键事件立即重绘 (响应 ≈0.2s, 绘制在主循环上下文)
+  8. 薄膜按键交互 (keypad 层, v1.3):
+      - 5 键 上/下/OK/左/右 (D2/D3/A1/A0/A2, 内部上拉, 轮询消抖 20ms, 事件队列)
+      - 左右键: 三页全局循环切换; 上下键: 页内光标 (LED 模式预选 / 教室时长选择)
+      - OK 键: LED 页应用预选模式 (ledPwmSetMode); 教室页开始测量 (运行中忽略防误触)
+      - 频闪仪页上下/OK 无动作 (按需求); 未接 OLED 时按键动作仍生效 (显示禁用)
 
   说明:
   - GPIO1 = ADC1_CH0, 12bit (0~4095), 11dB 衰减 (量程约 0~3.1V)
@@ -52,7 +56,8 @@
   - flicker.*  : 度量层 (窗口统计, FFT, 指标计算, 报告输出, 网页快照)
   - classroom.*: 度量层扩展 (教室多灯具测量 30s/1min/10min, Pst+SVM 判定, NVS 记录)
   - webdash.*  : 网页层 (AP 热点, Web 服务器, WebSocket JSON 推送, 控制路由)
-  - oled.*     : 显示层 (U8g2 SSD1309 IIC, 主页/教室测量页, 纯只读消费快照)
+  - keypad.*   : 按键层 (5 键轮询消抖, 事件队列, 仅采键不发动作)
+  - oled.*     : 显示层 (U8g2 SSD1309 IIC, 三页面 + tab 栏 + 按键交互, 主循环绘制)
   - main.cpp   : 编排 (setup/loop)
 */
 
@@ -64,6 +69,7 @@
 #include "classroom.h"
 #include "webdash.h"
 #include "oled.h"
+#include "keypad.h"
 
 static float blockBuf[FFT_SIZE];      // 整块样本缓冲 (16KB)
 static uint32_t blockIndex = 0;       // 已处理块计数
@@ -104,15 +110,23 @@ void setup()
 
     oledBegin();                          // OLED 显示 (未接模块仅提示并禁用, 不影响主功能)
 
+    keypadBegin();                        // 薄膜按键 (OLED 三页交互, 见 oledHandleKey)
+
     if (!adcDmaBegin())
     {
         while (true) delay(1000);     // 初始化失败, 停机
     }
 }
 
-// ---------------- 主循环: 取块 → 处理 → 定期报告/推送 ----------------
+// ---------------- 主循环: 按键 → 取块 → 处理 → 定期报告/推送 ----------------
 void loop()
 {
+    // 按键事件: 更新页面/光标 → 执行动作 (LED 模式/教室开始) → OLED 立即重绘
+    // (主循环上下文, 与 classroomOnWindow 零竞态; 每圈最多处理一个事件, 够用)
+    uint8_t kev = keypadGetEvent();
+    if (kev != KEY_NONE)
+        oledHandleKey(kev);
+
     if (!adcDmaReadBlock(blockBuf))
     {
         return;                       // 本块失败 (溢出/超时), 丢弃

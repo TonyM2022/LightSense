@@ -18,7 +18,9 @@ static bool rawLogged = false;                             // 首块样本是否
 bool adcDmaBegin(void)
 {
     adc_digi_init_config_t initCfg = {};
-    initCfg.max_store_buf_size = DMA_BUF_BYTES * 2;   // 驱动内部环形缓冲
+    initCfg.max_store_buf_size = DMA_BUF_BYTES * 4;   // 驱动内部缓冲 4 块 (余量 ≈820ms):
+                                                      // SW I2C 整帧绘制 ~100-200ms 挤占主循环,
+                                                      // 余量过小会周期性 DMA 溢出
     initCfg.conv_num_each_intr = 4096;                // 每次中断 4096 字节
     initCfg.adc1_chan_mask = (1 << ADC_CHANNEL);
     initCfg.adc2_chan_mask = 0;
@@ -91,7 +93,11 @@ bool adcDmaReadBlock(float *out)
 
         if (err == ESP_ERR_INVALID_STATE)
         {
-            overflowCnt++;        // DMA 溢出: 数据丢失, 本块作废
+            // DMA 溢出: 驱动进入错误态后不再返回数据, 必须重启转换才能自愈
+            // (触发场景: SW I2C 长绘制挤占主循环, 驱动内部缓冲被写满)
+            overflowCnt++;
+            adc_digi_stop();
+            adc_digi_start();
             return false;
         }
         if (err != ESP_OK || outLen == 0)

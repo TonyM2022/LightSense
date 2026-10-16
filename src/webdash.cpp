@@ -290,6 +290,7 @@ function connect(){
 connect();
 
 function render(d){
+  if(d.led!=null&&MODES[d.led])paintLed(MODES[d.led].p);   // 按键切换 LED 模式后同步高亮
   $('flk').textContent=d.flk.toFixed(2);
   $('fi').textContent=d.fi.toFixed(3);
   $('pst').textContent=d.pst.toFixed(3);
@@ -637,7 +638,8 @@ static size_t buildJson(const FlickerSnapshot *s)
                       (unsigned)cr.windows, sv);
     }
 
-    n += snprintf(jsonBuf + n, sizeof(jsonBuf) - n, "}}");
+    // LED 当前模式 (v1.3: 按键切换后网页 LED 页按钮高亮同步)
+    n += snprintf(jsonBuf + n, sizeof(jsonBuf) - n, ",\"led\":%u}}", (unsigned)ledPwmGetMode());
 
     return (n > 0 && n < (int)sizeof(jsonBuf)) ? (size_t)n : 0;
 }

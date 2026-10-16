@@ -34,3 +34,11 @@
 #define OLED_SDA             4                    // 板载 I2C SDA (丝印 SDA)
 #define OLED_SCL             5                    // 板载 I2C SCL (丝印 SCL)
 #define OLED_ADDR            0x3C                 // I2C 地址 (个别模块 0x3D, 探测时自动尝试)
+
+// ---------------- 薄膜按键 (v1.3, 5 键独立 GPIO, 内部上拉, 公共端接 GND) ----------------
+// GPIO38~42 为 ESP32-S3 JTAG 复用引脚; 默认 JTAG 走 USB Serial/JTAG (19/20), 用作按键不受影响
+#define KEY_PIN_UP           40                   // GPIO40 上移
+#define KEY_PIN_DOWN         41                   // GPIO41 下移
+#define KEY_PIN_OK           42                   // GPIO42 确认
+#define KEY_PIN_LEFT         38                   // GPIO38 左移
+#define KEY_PIN_RIGHT        39                   // GPIO39 右移
