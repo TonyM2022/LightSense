@@ -45,6 +45,8 @@ static void keypadTask(void *)
 
 void keypadBegin(void)
 {
+    pinMode(KEY_GND_PIN, OUTPUT);
+    digitalWrite(KEY_GND_PIN, LOW);         // 虚拟 GND: 按键模块公共端 (GPIO21 常置低)
     for (int i = 0; i < 5; i++)
         pinMode(KEY_PINS[i], INPUT_PULLUP);
     s_keyQueue = xQueueCreate(4, sizeof(uint8_t));

@@ -55,8 +55,8 @@ LED 标准闪烁源与教室灯光测量记录功能。
                     ┌──────────────────────┐
   光传感器 (光电二极管/  │                      │
   光敏电阻+分压等) ────┤ GPIO1  (ADC1_CH0)    │
-                    │                      │      D8       220~330Ω
-                    │   ESP32-S3           ├──── GPIO21 ───[电阻]───►|── GND
+                    │                      │      D7       220~330Ω
+                    │   ESP32-S3           ├──── GPIO17 ───[电阻]───►|── GND
                     │   (Wifiduino32S3,    │                        (外接 LED,
                     │    8MB Flash)        │ WiFi AP: LightSense     自测光源)
                     └──────────────────────┘ http://192.168.4.1
@@ -65,9 +65,10 @@ LED 标准闪烁源与教室灯光测量记录功能。
 | 引脚/资源 | 用途 | 说明 |
 |---|---|---|
 | GPIO1 (ADC1_CH0) | 光信号输入 | 12 bit（0~4095），12 dB 衰减（满量程约 3.1 V）；仅 ADC1 支持 DMA 连续模式 |
-| GPIO21 (D8) | LED 闪烁源输出 | LEDC 硬件 PWM，10 bit 分辨率；经 220~330 Ω 限流电阻接 LED |
+| GPIO17 (D7) | LED 闪烁源输出 | LEDC 硬件 PWM，10 bit 分辨率；经 220~330 Ω 限流电阻接 LED |
+| GPIO21 (D8) | 按键模块公共端 | 固件常置低电平（虚拟 GND），薄膜按键公共端接此脚 |
 | GPIO4 / GPIO5 | OLED I2C SDA / SCL | 板载丝印 SDA/SCL；接 1.54" OLED（SSD1309，3.3 V 供电），软件模拟 I2C 驱动 |
-| GPIO38~GPIO42 | 五键薄膜按键 | 左/右/上/下/OK，内部上拉，按键公共端接 GND（见 `src/config.h`） |
+| GPIO38~GPIO42 | 五键薄膜按键 | 左/右/上/下/OK，内部上拉，按键公共端接 GPIO21（虚拟 GND） |
 | WiFi AP | 网页仪表 | SSID `LightSense`，密码 `lightsense`（见 `src/config.h` 可改） |
 | USB 串口 | 调试输出 | 115200 bps，每报告窗口（≈1.024 s）输出一次统计 |
 
@@ -187,9 +188,10 @@ LightSense/
 | `ADC_DARK_LIMIT` | 400 | 判定光照下限（窗口均值 ADC 码） |
 | `ADC_BRIGHT_LIMIT` | 3000 | 判定光照上限 |
 | `WIFI_AP_SSID` / `WIFI_AP_PASS` | LightSense / lightsense | AP 热点 |
-| `LED_PIN` | GPIO21 | LED 闪烁源输出 |
+| `LED_PIN` | GPIO17 | LED 闪烁源输出 |
+| `KEY_GND_PIN` | GPIO21 | 按键模块公共端（固件常置低电平，虚拟 GND） |
 | `OLED_SDA` / `OLED_SCL` | 4 / 5 | OLED I2C 引脚（软件模拟，板载丝印 SDA/SCL） |
-| `KEY_PIN_UP/DOWN/OK/LEFT/RIGHT` | 40/41/42/38/39 | 五键薄膜按键引脚（内部上拉，公共端 GND） |
+| `KEY_PIN_UP/DOWN/OK/LEFT/RIGHT` | 40/41/42/38/39 | 五键薄膜按键引脚（内部上拉，公共端接 `KEY_GND_PIN`） |
 
 ## 使用说明
 

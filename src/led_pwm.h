@@ -1,6 +1,6 @@
 #pragma once
 // ---------------- LED PWM 驱动层 ----------------
-// LEDC 硬件 PWM 输出 (D8 = GPIO21): 生成精确的 LED 闪烁频率,
+// LEDC 硬件 PWM 输出 (D7 = GPIO17): 生成精确的 LED 闪烁频率,
 // 时序由 LEDC 外设硬件保证, 不受主循环 / WiFi / ADC 干扰
 #include <stdint.h>
 

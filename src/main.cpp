@@ -25,7 +25,7 @@
       - S3 开 AP 热点 (SSID 见 config.h), 浏览器访问 http://192.168.4.1
       - 三页面按钮切换: 频闪仪 / LED 控制 / 教室测量
       - WebSocket 每报告窗口推送 JSON 快照: 波形包络 / 频谱 / 指标 / 教室测量进度
-  5. LED 闪烁频率控制 (led_pwm 层, D8 = GPIO21):
+  5. LED 闪烁频率控制 (led_pwm 层, D7 = GPIO17):
       - LEDC 硬件 PWM: 常灭 / 常亮 / 50Hz / 100Hz / 500Hz / 1kHz / 5kHz, 闪烁模式占空比 50%
       - 网页 LED 控制页切换, 与测量互不干扰 (可照射自测)
   6. 教室灯光测量 (classroom 层):

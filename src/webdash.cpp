@@ -95,7 +95,7 @@ canvas{width:100%;height:180px;display:block}
 </section>
 <section id="pg-led" style="display:none">
   <div class="card wide">
-    <div class="label">LED 输出模式 (D8 = GPIO21, 闪烁模式占空比 50%, 常亮 100%, 常灭 0%)</div>
+    <div class="label">LED 输出模式 (D7 = GPIO17, 闪烁模式占空比 50%, 常亮 100%, 常灭 0%)</div>
     <div class="btns" id="ledbtns"></div>
     <div class="meta" id="ledmeta" style="margin-top:8px">--</div>
   </div>

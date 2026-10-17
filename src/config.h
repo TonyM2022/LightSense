@@ -26,7 +26,7 @@
 #define WEB_SPEC_POINTS      256                  // 频谱显示点数 (对数频带 max-pool, 4.9 Hz~5 kHz)
 
 // ---------------- LED PWM 控制 ----------------
-#define LED_PIN              21                   // D8 = GPIO21 → 220~330Ω → LED → GND
+#define LED_PIN              17                   // D7 = GPIO17 → 220~330Ω → LED → GND
 #define LED_PWM_CHANNEL      0                    // LEDC 通道 0 (与 ADC/WiFi 无冲突)
 #define LED_PWM_RESOLUTION   10                   // 10bit 占空比 (1024 级, 最高支持 ~78 kHz)
 
@@ -35,10 +35,11 @@
 #define OLED_SCL             5                    // 板载 I2C SCL (丝印 SCL)
 #define OLED_ADDR            0x3C                 // I2C 地址 (个别模块 0x3D, 探测时自动尝试)
 
-// ---------------- 薄膜按键 (v1.3, 5 键独立 GPIO, 内部上拉, 公共端接 GND) ----------------
+// ---------------- 薄膜按键 (v1.3, 5 键独立 GPIO, 内部上拉, 公共端接 KEY_GND_PIN 虚拟 GND) ----------------
 // GPIO38~42 为 ESP32-S3 JTAG 复用引脚; 默认 JTAG 走 USB Serial/JTAG (19/20), 用作按键不受影响
 #define KEY_PIN_UP           40                   // GPIO40 上移
 #define KEY_PIN_DOWN         41                   // GPIO41 下移
 #define KEY_PIN_OK           42                   // GPIO42 确认
 #define KEY_PIN_LEFT         38                   // GPIO38 左移
 #define KEY_PIN_RIGHT        39                   // GPIO39 右移
+#define KEY_GND_PIN          21                   // GPIO21 常置低电平, 作按键模块公共端 (虚拟 GND)
