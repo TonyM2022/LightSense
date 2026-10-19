@@ -43,3 +43,14 @@
 #define KEY_PIN_LEFT         38                   // GPIO38 左移
 #define KEY_PIN_RIGHT        39                   // GPIO39 右移
 #define KEY_GND_PIN          21                   // GPIO21 常置低电平, 作按键模块公共端 (虚拟 GND)
+
+// ---------------- OneNET 云端 (v1.4, MQTT) ----------------
+// 连接参数 (WiFi 账号/产品 ID/设备名/Token) 不入库, 由网页 /setup 配置存 NVS,
+// 生成方法见 src/cloud_cfg.h.example
+#define CLOUD_MQTT_HOST      "mqtts.heclouds.com" // OneNET Studio MQTT 接入点 (1883 明文, 8883 才是 TLS)
+#define CLOUD_MQTT_PORT      1883
+#define CLOUD_SNAPSHOT_SEC   30                   // 周期属性上报间隔 (秒, 免费额度按条计勿过快)
+#define CLOUD_RETRY_SEC      10                   // MQTT 重连退避 (秒, 防止阻塞主循环过久)
+#define CLOUD_PUB_ENABLE     1                    // A/B 排查开关: 1=正常上报; 0=纯空闲会话不发报文 (诊断用)
+#define CLOUD_REC_ENABLE     1                    // 教室记录补传开关
+#define CLOUD_PROBE          0                    // A/B 排查开关: 1=逐属性轮询定位; 2=老版 dp topic 探测 (判产品类型); 平时 0

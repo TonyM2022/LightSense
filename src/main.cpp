@@ -43,6 +43,10 @@
       - 左右键: 三页全局循环切换; 上下键: 页内光标 (LED 模式预选 / 教室时长选择)
       - OK 键: LED 页应用预选模式 (ledPwmSetMode); 教室页开始测量 (运行中忽略防误触)
       - 频闪仪页上下/OK 无动作 (按需求); 未接 OLED 时按键动作仍生效 (显示禁用)
+  9. OneNET 云端 (cloud 层, v1.4):
+      - AP+STA 联网 (网页 /setup 配置 WiFi/产品/设备/Token 存 NVS, 密钥不入库)
+      - MQTT 属性快照每 30s 上报 + 教室记录断网缓存联网补传 (NVS 同步位图)
+      - 下行属性设置远程切换 LED 模式; 全程非阻塞, 不影响测量节拍
 
   说明:
   - GPIO1 = ADC1_CH0, 12bit (0~4095), 11dB 衰减 (量程约 0~3.1V)
@@ -56,6 +60,7 @@
   - flicker.*  : 度量层 (窗口统计, FFT, 指标计算, 报告输出, 网页快照)
   - classroom.*: 度量层扩展 (教室多灯具测量 30s/1min/10min, Pst+SVM 判定, NVS 记录)
   - webdash.*  : 网页层 (AP 热点, Web 服务器, WebSocket JSON 推送, 控制路由)
+  - cloud.*    : 云端层 (OneNET MQTT: 属性上报/教室记录补传/下行控制, /setup 配网)
   - keypad.*   : 按键层 (5 键轮询消抖, 事件队列, 仅采键不发动作)
   - oled.*     : 显示层 (U8g2 SSD1309 IIC, 三页面 + tab 栏 + 按键交互, 主循环绘制)
   - main.cpp   : 编排 (setup/loop)
@@ -68,6 +73,7 @@
 #include "flicker.h"
 #include "classroom.h"
 #include "webdash.h"
+#include "cloud.h"
 #include "oled.h"
 #include "keypad.h"
 
@@ -102,6 +108,8 @@ void setup()
 
     classroomBegin();                     // 教室测量: 加载 NVS 历史记录
 
+    cloudBegin();                         // 云端: 读 NVS 配置, 已配置则 AP+STA 联网 (须在 webdashBegin 前)
+
     // WiFi 网页仪表 (失败仅告警, 串口功能不受影响)
     if (!webdashBegin())
     {
@@ -121,6 +129,8 @@ void setup()
 // ---------------- 主循环: 按键 → 取块 → 处理 → 定期报告/推送 ----------------
 void loop()
 {
+    cloudTick();                          // 云端状态机 + 上报/补传 (未配置时直接返回, 零开销)
+
     // 按键事件: 更新页面/光标 → 执行动作 (LED 模式/教室开始) → OLED 立即重绘
     // (主循环上下文, 与 classroomOnWindow 零竞态; 每圈最多处理一个事件, 够用)
     uint8_t kev = keypadGetEvent();
@@ -142,5 +152,6 @@ void loop()
         classroomOnWindow(snap);          // 教室测量: 逐窗口累加
         oledShow(snap);                   // OLED 刷新 (主页/教室页, 未接模块直接返回)
         webdashBroadcast(snap);           // 推送到浏览器
+        cloudOnSnapshot(snap);            // 云端: 缓存最新快照 (周期上报用)
     }
 }

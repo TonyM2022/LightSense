@@ -1,0 +1,36 @@
+// ---------------- OneNET 云端配置说明 (v1.4) ----------------
+//
+// 本文件仅为说明文档, 工程不编译它; 真实连接参数不写入代码仓库,
+// 设备上电后访问 http://192.168.4.1/setup (AP 热点下) 在网页中填写, 存 NVS。
+//
+// 需要填写 5 项:
+//   1. WiFi SSID / 密码   : 设备以 AP+STA 模式接入的路由器 (本地网页仪表不受影响)
+//   2. 产品 ID (product_id): OneNET 控制台 → 产品详情, 如 "yourProductId"
+//   3. 设备名称 (device_name): OneNET 控制台 → 设备列表, 如 "yourDeviceName"
+//   4. 设备 Token         : 作为 MQTT 密码使用, 形如
+//      version=2018-10-31&res=products%2F<productId>%2Fdevices%2F<deviceName>&et=<过期时间戳>&method=md5&sign=<签名>
+//      整串填入 /setup 页 Token 输入框 (最长 255 字符)。
+//
+//   Token 生成 (OneNET 官方文档中心下载 "Token 生成工具"):
+//     res    = products/<productId>/devices/<deviceName>
+//     et     = 过期时间戳 (秒, 建议设到使用期之后, 如 2000000000)
+//     key    = 设备级/产品级 access key (OneNET 控制台设备详情查看, 勿外传)
+//     method = md5
+//   工具输出的一串 "version=...&res=...&et=...&method=md5&sign=..." 即 Token, 整串填入。
+//
+// 平台侧物模型要求 (需定义并发布):
+//   属性: lux(int32,step1) pst(float,step0.01) svm(float,step0.01) freq(float,step0.1)
+//         ripple(float,step0.01) verdict(enum 0/2/3/5/6/7) led(int32,可写 0~100)
+//   事件: record (类型 info, 输出参数 data: string 512) — 教室记录 JSON 补传
+//   注意: float 属性 step 决定允许小数位数, 超精度上报被拒 (code 2254);
+//         int 属性上报浮点同样被拒 (code 2211)。
+//
+// topic (OneJSON, 官方文档 "物模型通信协议"):
+//   上行属性:  $sys/{pid}/{dev}/thing/property/post        {"id":"N","version":"1.0","params":{"lux":{"value":..},..}}
+//   属性应答:  $sys/{pid}/{dev}/thing/property/post/reply  {"id":"N","code":200,...}
+//   下行设置:  $sys/{pid}/{dev}/thing/property/set         {"id":"x","params":{"led":N}} 远程切换 LED 模式
+//   设置应答:  $sys/{pid}/{dev}/thing/property/set_reply
+//   事件上报:  $sys/{pid}/{dev}/thing/event/post           {"id":"N","params":{"record":{"value":{"data":"<记录JSON>"}}}}
+//   事件应答:  $sys/{pid}/{dev}/thing/event/post/reply
+//
+// 注意: Token/密码仅存设备 NVS; 若需更换, 重新访问 /setup 修改即可。

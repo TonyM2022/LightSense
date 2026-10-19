@@ -46,6 +46,7 @@ LED 标准闪烁源与教室灯光测量记录功能。
 | LED 标准闪烁源 | 板载外接 LED 输出 常亮/50/100/500/1000/5000 Hz 方波（占空比 50%），闭环自测 |
 | 教室灯光测量 | 30 s / 1 min / 10 min 三档时长，多灯具打标签依次测量，NVS 断电保存 50 条，CSV 导出 |
 | OLED 本地显示 + 五键交互 | 1.54" SSD1309 OLED（软件模拟 I2C）+ 5 键薄膜按键，三页面与网页页签一致，离线完成 LED 切换与教室测量 |
+| OneNET 云端接入 | MQTT 接入 OneNET Studio 物模型平台（OneJSON），30 s 周期属性上云、教室记录事件补传（断点续传）、LED 远程控制；网页 `/setup` 配网，AP+STA 共存本地功能不受影响 |
 
 ## 硬件结构
 
@@ -99,6 +100,7 @@ main.cpp (编排层)
 │                        填充 FlickerSnapshot 网页快照)           │
 ├──────────────────────────────────────────────────────────────┤
 │ 应用层    classroom.* 教室测量: 逐窗聚合 + 三档时长 + NVS 存储    │
+│           cloud.*     OneNET 云端: 属性上报/记录补传/远程控制     │
 ├──────────────────────────────────────────────────────────────┤
 │ 网页层    webdash.*   AP 热点 + AsyncWebServer + WebSocket 广播 │
 │                       (内嵌单页面前端, 三页面切换)               │
@@ -173,6 +175,8 @@ LightSense/
 │   ├── webdash.h/.cpp    # 网页层: AP 热点 + 异步服务器 + WebSocket + 内嵌前端
 │   ├── keypad.h/.cpp     # 按键层: 5 键轮询消抖 + 事件队列
 │   ├── oled.h/.cpp       # 显示层: U8g2 SSD1309 OLED (三页交互, 软件模拟 I2C)
+│   ├── cloud.h/.cpp      # 云端层: OneNET MQTT 状态机 + 属性/事件上报 + LED 远程控制
+│   ├── cloud_cfg.h.example # 云端 Token 生成方法示例 (凭据经 /setup 页存 NVS, 不入库)
 ├── readme.md             # 本文件
 └── .gitignore            # 忽略 .pio/ 等构建产物
 ```
@@ -192,6 +196,9 @@ LightSense/
 | `KEY_GND_PIN` | GPIO21 | 按键模块公共端（固件常置低电平，虚拟 GND） |
 | `OLED_SDA` / `OLED_SCL` | 4 / 5 | OLED I2C 引脚（软件模拟，板载丝印 SDA/SCL） |
 | `KEY_PIN_UP/DOWN/OK/LEFT/RIGHT` | 40/41/42/38/39 | 五键薄膜按键引脚（内部上拉，公共端接 `KEY_GND_PIN`） |
+| `CLOUD_MQTT_HOST` / `CLOUD_MQTT_PORT` | mqtts.heclouds.com / 1883 | OneNET Studio MQTT 接入点 |
+| `CLOUD_SNAPSHOT_SEC` / `CLOUD_RETRY_SEC` | 30 / 10 | 周期属性上报间隔 / 重连退避 |
+| `CLOUD_PUB_ENABLE` / `CLOUD_REC_ENABLE` / `CLOUD_PROBE` | 1 / 1 / 0 | 云端开关（属性上报 / 记录补传 / 诊断探测，平时 0） |
 
 ## 使用说明
 
@@ -233,6 +240,40 @@ LightSense/
   切页查看实时值；
 - 未接 OLED 时屏幕黑屏，测量与按键功能不受影响。
 
+### OneNET 云端接入（v1.4）
+
+设备可接入移动 OneNET Studio 物模型平台（MQTT，`mqtts.heclouds.com:1883`），
+实现数据上云与远程控制，全部通信遵循官方 OneJSON 协议：
+
+1. **配网**：连接设备热点后访问 `http://192.168.4.1/setup`，依次填入 WiFi
+   账号/密码（支持下拉选择在线扫描到的热点）、OneNET 产品 ID、设备名称、
+   设备 Token（生成方法见 `src/cloud_cfg.h.example`），保存后立即生效；
+   凭据存 NVS 断电不丢。AP+STA 共存，配置云端不影响本地仪表使用；
+2. **属性上报**：联网后每 30 s 上报一次 `lux / pst / svm / freq / ripple /
+   verdict / led` 七个属性（topic `$sys/{pid}/{设备名}/thing/property/post`，
+   平台经 `.../post/reply` 应答校验结果）；
+3. **教室记录补传**：教室测量记录经物模型**事件**通道上云（topic
+   `$sys/{pid}/{设备名}/thing/event/post`，事件标识符 `record`，输出参数
+   `data` 为记录 JSON 字符串，保留 3 位小数精度）；断网期间记录存本地，
+   重连后按 NVS 位图逐条补传（断点续传）；
+4. **LED 远程控制**：平台下发属性设置 `led`（0~6，对应 7 种模式）即可远程
+   切换 LED 输出，设备执行后自动应答 `set_reply`；
+5. **物模型配置要求**（平台侧需定义并发布）：
+
+   | 标识符 | 类型 | 规格 | 说明 |
+   |---|---|---|---|
+   | lux | int32 | step 1 | 窗口光照均值（ADC 码） |
+   | pst | float | step 0.01 | Pst^LM（步长务必 0.01，0.1 会被平台拒收） |
+   | svm | float | step 0.01 | SVM |
+   | freq | float | step 0.1, max 10000 | 主频 Hz |
+   | ripple | float | step 0.01 | 波动深度 % |
+   | verdict | enum | 0/2/3/5/6/7 | 综合判定码 |
+   | led | int32 | rw, 0~100 | LED 远程控制 |
+   | 事件 record | — | 输出参数 data: string 512 | 教室记录补传 |
+
+   > float 属性的步长（step）定义了允许的小数位数，上报值超出步长精度会被
+   > 平台以 `code 2254` 拒收；int 属性上报浮点同样被拒（`code 2211`）。
+
 ### 串口输出示例
 
 ```
@@ -260,6 +301,7 @@ Zone     : Light+Pst+SVM FAIL-BOTH
 | GET | `/api/classroom` | 教室测量状态 + 全部记录（JSON） |
 | POST | `/api/classroom/start?label=xxx&dur=30\|60\|600` | 开始一次测量（dur 秒，缺省 30） |
 | POST | `/api/classroom/clear` | 清空全部记录 |
+| GET | `/setup` | 云端配网页面（WiFi 账号/密码、产品 ID、设备名、Token，存 NVS） |
 
 ### 自测参考值（LED 自测档，外接 LED 方波 50% 占空比）
 
@@ -298,6 +340,7 @@ Zone     : Light+Pst+SVM FAIL-BOTH
 | v1.1 | 综合判定增加光照量程前置检查（过暗/过亮否决） |
 | v1.2 | 1.54" OLED 本地显示（判定 + 指标摘要 / 教室进度页）；切换 8MB 分区表 |
 | v1.3 | 五键薄膜按键 + OLED 三页交互（页面/光标/时长选择，离线完成 LED 切换与教室测量）；OLED 改软件模拟 I2C，修复 2.0.17 硬件 I2C 驱动总线卡死；ADC 溢出自愈；判定框自适应宽度 |
+| v1.4 | OneNET 云端层：MQTT 属性上报（30 s）/ 教室记录事件补传（NVS 位图断点续传）/ LED 远程控制；网页 /setup 配网（WiFi 扫描下拉 + 255 字符 Token）；按 OneJSON 官方协议对齐（property/post + event/post + set），修复 lux int32 类型、pst 步长校验、记录位图 NVS 持久化等问题 |
 
 ## 参考来源
 

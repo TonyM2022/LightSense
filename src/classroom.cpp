@@ -16,6 +16,7 @@
 #include "config.h"
 #include "flicker.h"
 #include "classroom.h"
+#include "cloud.h"
 
 static Preferences prefs;
 static ClassroomRecord recs[CLS_MAX_RECORDS];
@@ -192,6 +193,7 @@ bool classroomOnWindow(const FlickerSnapshot *s)
 
     recs[recCount++] = r;
     nvsSaveRecord(recCount - 1);
+    cloudPushRecord(&recs[recCount - 1], recCount - 1);   // 云端: 入待同步队列 (未配置时忽略)
 
     lastResult = r;
     resultPending = true;

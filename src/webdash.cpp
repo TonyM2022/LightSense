@@ -5,7 +5,10 @@
 //   GET /led  → 查询/设置 LED 输出模式 (?mode=const|50hz|100hz|500hz|1khz|5khz|off)
 //   GET  /api/classroom        → 教室测量状态 + 记录列表
 //   POST /api/classroom/start  → 开始测量 (?label=灯具标签&dur=30|60|600 秒)
-//   POST /api/classroom/clear  → 清空记录
+//   POST /api/classroom/clear  → 清空记录 (同时清云端同步位图)
+//   GET  /setup  POST /setup   → OneNET 云端配网页 (WiFi/产品/设备/Token 存 NVS)
+//   GET  /api/cloud            → 云端配置回显 + 连接状态
+//   GET  /api/wifiscan         → WiFi 异步扫描 (首次触发, 轮询取结果)
 #include <Arduino.h>
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
@@ -13,6 +16,7 @@
 #include "led_pwm.h"
 #include "flicker.h"
 #include "classroom.h"
+#include "cloud.h"
 #include "webdash.h"
 
 static AsyncWebServer server(80);
@@ -430,9 +434,82 @@ static void utf8Trunc(String &s, size_t maxBytes)
     s = s.substring(0, cut);
 }
 
+// ---------------- 云端配网页 (/setup, 独立小页, 密钥只存设备 NVS) ----------------
+static const char SETUP_HTML[] PROGMEM = R"rawliteral(
+<!doctype html><html lang=zh><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>LightSense 云端配置</title>
+<style>
+body{font-family:system-ui,'Microsoft YaHei',sans-serif;background:#0f172a;color:#e2e8f0;display:flex;justify-content:center;padding:24px;margin:0}
+form{background:#1e293b;padding:20px;border-radius:12px;max-width:420px;width:100%}
+h2{margin:0 0 12px;font-size:18px}p{font-size:12px;color:#94a3b8;margin:6px 0}
+label{display:block;margin:10px 0 4px;font-size:13px;color:#94a3b8}
+input,select{width:100%;box-sizing:border-box;padding:8px;border-radius:6px;border:1px solid #334155;background:#0f172a;color:#e2e8f0}
+.sc{display:flex;gap:8px;align-items:center;margin-top:6px}
+.sc button{margin-top:0;width:auto;padding:6px 12px;font-size:13px}
+button{margin-top:16px;width:100%;padding:10px;border:0;border-radius:8px;background:#2b6cb0;color:#fff;font-size:15px}
+button:disabled{opacity:.5}.msg{margin-top:10px;font-size:13px;color:#7dd3fc}
+.st{margin-top:14px;font-size:13px}
+</style></head><body><form id=f>
+<h2>OneNET 云端配置</h2>
+<p>参数存设备本地 NVS, 不上传; Token 生成方法见仓库 src/cloud_cfg.h.example</p>
+<label>WiFi 名称 (SSID)</label>
+<select id=ssidsel><option value="">— 点击下方按钮扫描 WiFi —</option></select>
+<div class=sc><button id=scant type=button>扫描 WiFi</button><div class=msg id=scanm style="margin:0"></div></div>
+<input id=ssid maxlength=32 placeholder="也可直接手动输入 WiFi 名称">
+<label>WiFi 密码 (可空 = 开放网络)</label><input id=pass maxlength=64>
+<label>产品 ID (product_id)</label><input id=pid maxlength=24>
+<label>设备名称 (device_name)</label><input id=dev maxlength=24>
+<label>设备 Token (MQTT 密码, 整串)</label><input id=tok maxlength=255>
+<button id=b type=submit>保存并重启</button>
+<div class=msg id=m></div>
+<div class=st id=s></div>
+</form>
+<script>
+fetch('/api/cloud').then(r=>r.json()).then(c=>{
+ ssid.value=c.ssid||'';pass.value=c.pass||'';pid.value=c.pid||'';
+ dev.value=c.dev||'';tok.value=c.tok||'';
+ s.textContent='连接状态: '+c.stn+(c.cfg?' (已配置)':' (未配置)');
+});
+let scanning=false;
+scant.onclick=()=>{
+ if(scanning)return;scanning=true;scanm.textContent='扫描中...';scant.disabled=true;
+ let tries=0;
+ const poll=()=>fetch('/api/wifiscan').then(r=>r.json()).then(d=>{
+  if(!d.done){if(++tries>12){scanm.textContent='扫描超时,请重试';scanning=false;scant.disabled=false;return;}
+   setTimeout(poll,1000);return;}
+  ssidsel.innerHTML='<option value="">— 选择扫描到的 WiFi —</option>';
+  d.nets.forEach(n=>{const o=document.createElement('option');
+   o.value=n.ssid;o.textContent=n.ssid+' ('+n.rssi+'dBm'+(n.enc?'':' 开放')+')';
+   ssidsel.appendChild(o);});
+  scanm.textContent=d.nets.length+' 个网络';
+  scanning=false;scant.disabled=false;
+ }).catch(()=>{scanm.textContent='请求失败';scanning=false;scant.disabled=false;});
+ poll();
+};
+ssidsel.onchange=()=>{if(ssidsel.value)ssid.value=ssidsel.value;};
+f.onsubmit=async e=>{
+ e.preventDefault();b.disabled=true;m.textContent='保存中...';
+ const b2=new URLSearchParams();
+ b2.set('ssid',ssid.value);b2.set('pass',pass.value);b2.set('pid',pid.value);
+ b2.set('dev',dev.value);b2.set('tok',tok.value);
+ try{const r=await fetch('/setup',{method:'POST',body:b2});
+     m.textContent=await r.text();}
+ catch(err){m.textContent='已发送, 设备重启中...';}
+};
+</script></body></html>)rawliteral";
+
+static String postParam(AsyncWebServerRequest *req, const char *k)
+{
+    if (req->hasParam(k, true))
+        return req->getParam(k, true)->value();
+    return String();
+}
+
 bool webdashBegin(void)
 {
-    WiFi.mode(WIFI_AP);
+    if (WiFi.getMode() != WIFI_AP_STA)   // cloudBegin 已配置时处于 AP+STA, 勿覆盖
+        WiFi.mode(WIFI_AP);
     if (!WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASS))
     {
         Serial.println("WiFi softAP failed.");
@@ -555,11 +632,83 @@ bool webdashBegin(void)
         req->send(200, "application/json", "{\"ok\":1}");
     });
 
-    // 教室测量: 清空全部记录
+    // 教室测量: 清空全部记录 (同时清云端同步位图, 记录索引重新从 0 对应)
     server.on("/api/classroom/clear", HTTP_POST, [](AsyncWebServerRequest *req)
     {
         classroomClear();
+        cloudResetSync();
         req->send(200, "application/json", "{\"ok\":1}");
+    });
+
+    // OneNET 云端配置: 配网页 + 配置回显 (保存后 onDisconnect 时重启生效)
+    server.on("/setup", HTTP_GET, [](AsyncWebServerRequest *req)
+              { req->send_P(200, "text/html", SETUP_HTML); });
+    server.on("/setup", HTTP_POST, [](AsyncWebServerRequest *req)
+    {
+        String ssid = postParam(req, "ssid");
+        String pass = postParam(req, "pass");
+        String pid = postParam(req, "pid");
+        String dev = postParam(req, "dev");
+        String tok = postParam(req, "tok");
+        if (ssid.length() == 0 || pid.length() == 0 || dev.length() == 0 || tok.length() == 0)
+        {
+            req->send(400, "text/plain; charset=utf-8", "WiFi/产品ID/设备名/Token 不能为空");
+            return;
+        }
+        if (ssid.length() > 32 || pass.length() > 64 || pid.length() > 24 ||
+            dev.length() > 24 || tok.length() > 256)
+        {
+            req->send(400, "text/plain; charset=utf-8", "参数过长");
+            return;
+        }
+        cloudCfgSave(ssid, pass, pid, dev, tok);
+        req->onDisconnect([]()
+                          { ESP.restart(); });
+        req->send(200, "text/plain; charset=utf-8", "已保存, 设备正在重启...");
+    });
+    server.on("/api/cloud", HTTP_GET, [](AsyncWebServerRequest *req)
+    {
+        char ssid[33], pass[65], pid[25], dev[25], tok[257];
+        bool cfg = cloudCfgGet(ssid, sizeof(ssid), pass, sizeof(pass), pid, sizeof(pid),
+                               dev, sizeof(dev), tok, sizeof(tok));
+        char e1[67], e2[131], e3[51], e4[51], e5[519], buf[960];
+        jsonEscape(e1, sizeof(e1), ssid);
+        jsonEscape(e2, sizeof(e2), pass);
+        jsonEscape(e3, sizeof(e3), pid);
+        jsonEscape(e4, sizeof(e4), dev);
+        jsonEscape(e5, sizeof(e5), tok);
+        snprintf(buf, sizeof(buf),
+                 "{\"ok\":1,\"cfg\":%u,\"state\":%u,\"stn\":\"%s\","
+                 "\"ssid\":\"%s\",\"pass\":\"%s\",\"pid\":\"%s\",\"dev\":\"%s\",\"tok\":\"%s\"}",
+                 (unsigned)cfg, (unsigned)cloudGetState(), cloudStateName(),
+                 e1, e2, e3, e4, e5);
+        req->send(200, "application/json", buf);
+    });
+
+    // WiFi 异步扫描: 首次调用触发后台扫描, 前端每秒轮询, 完成后返回网络列表
+    // (扫描由 WiFi 驱动异步执行, 不阻塞主循环, 测量节拍不受影响)
+    server.on("/api/wifiscan", HTTP_GET, [](AsyncWebServerRequest *req)
+    {
+        int16_t n = WiFi.scanComplete();
+        if (n < 0)                       // FAILED(-2)→启动异步扫描; RUNNING(-1)→继续等
+        {
+            if (n == WIFI_SCAN_FAILED)
+                WiFi.scanNetworks(true, false);
+            req->send(200, "application/json", "{\"ok\":1,\"done\":0,\"nets\":[]}");
+            return;
+        }
+        String json = "{\"ok\":1,\"done\":1,\"nets\":[";
+        for (int16_t i = 0; i < n && i < 20; i++)   // 限前 20 个 (按信号强度排序)
+        {
+            char e[67], item[176];
+            jsonEscape(e, sizeof(e), WiFi.SSID(i).c_str());
+            snprintf(item, sizeof(item), "%s{\"ssid\":\"%s\",\"rssi\":%d,\"enc\":%u}",
+                     i ? "," : "", e, (int)WiFi.RSSI(i), (unsigned)WiFi.encryptionType(i));
+            json += item;
+        }
+        json += "]}";
+        WiFi.scanDelete();
+        req->send(200, "application/json", json);
     });
 
     server.addHandler(&ws);
@@ -638,8 +787,9 @@ static size_t buildJson(const FlickerSnapshot *s)
                       (unsigned)cr.windows, sv);
     }
 
-    // LED 当前模式 (v1.3: 按键切换后网页 LED 页按钮高亮同步)
-    n += snprintf(jsonBuf + n, sizeof(jsonBuf) - n, ",\"led\":%u}}", (unsigned)ledPwmGetMode());
+    // LED 当前模式 (v1.3: 按键切换后网页 LED 页按钮高亮同步) + 云端状态 (v1.4)
+    n += snprintf(jsonBuf + n, sizeof(jsonBuf) - n, ",\"led\":%u,\"cloud\":\"%s\"}}",
+                  (unsigned)ledPwmGetMode(), cloudStateName());
 
     return (n > 0 && n < (int)sizeof(jsonBuf)) ? (size_t)n : 0;
 }
