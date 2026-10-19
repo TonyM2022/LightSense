@@ -8,6 +8,7 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <Preferences.h>
+#include <time.h>
 #include "config.h"
 #include "flicker.h"
 #include "classroom.h"
@@ -25,6 +26,7 @@ static bool cfgOk = false;
 static CloudState st = CL_OFF;
 static uint32_t lastMqttTry = 0, lastPub = 0, lastRecPub = 0;
 static const FlickerSnapshot *lastSnap = NULL;
+static bool ntpStarted = false;   // SNTP 只发起一次 (库内部自动周期再同步)
 
 // MQTT topic (OneNET Studio OneJSON 物模型, 官方文档 detail/902)
 static char upTopic[96];      // $sys/{pid}/{dev}/thing/property/post       属性上报 (OneJSON)
@@ -303,6 +305,12 @@ void cloudTick(void)
         {
             Serial.print("Cloud  : WiFi connected, IP ");
             Serial.println(WiFi.localIP());
+            if (!ntpStarted)             // NTP 校时: 让教室记录带上真实日期 (OLED 按键发起的测量也能有日期)
+            {
+                configTime(8 * 3600, 0, "ntp.aliyun.com", "cn.pool.ntp.org", "pool.ntp.org");
+                ntpStarted = true;
+                Serial.println("Cloud  : NTP sync requested");
+            }
             st = CL_CONNECTING;
             lastMqttTry = 0;             // 立即尝试 MQTT
         }
@@ -415,6 +423,13 @@ const char *cloudStateName(void)
     case CL_ONLINE:     return "ONLINE";
     default:            return "OFF";
     }
+}
+
+uint32_t cloudEpoch(void)
+{
+    time_t t = time(nullptr);
+    // ESP32 上电初值为 1970-01-01 附近; NTP 同步成功后才落到合理区间 (2020-09 之后)
+    return (t > 1600000000) ? (uint32_t)t : 0;
 }
 
 bool cloudCfgGet(char *ssid, size_t ss, char *pass, size_t ps,

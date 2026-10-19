@@ -6,10 +6,11 @@
 //   波动深度: 全部窗口均值, 仅展示不判定
 //   主频    : 取频谱能量最大窗口的主频, 仅展示
 // 时长档位: 30s (29 窗) / 1min (58 窗) / 10min (586 窗), 网页选择
-// 存储: NVS namespace "cls", 键 cnt + r0..rN-1. 记录 blob 四代:
-//   v0.7.1 64B (无 windows/svm/vavg) / 中间版 64B (仅 windows) /
-//   v0.8~v0.9 72B (+svm) / 当前版 74B (+vavg), 按 blob 长度识别;
-//   64B 旧记录 windows==0 (v0.7.1 填充字节恒 0) 补 30s 档, SVM/vavg 补 0 (网页显示 --)
+// 存储: NVS namespace "cls", 键 cnt + r0..rN-1. 记录 blob 五代:
+//   v0.7.1 64B (无 windows/svm/vavg/epoch) / 中间版 64B (仅 windows) /
+//   v0.8~v0.9 72B (+svm) / v1.1 76B (+vavg) / 当前 80B (+epoch), 按 blob 长度识别;
+//   旧记录 windows==0 (v0.7.1 填充字节恒 0) 补 30s 档, SVM/vavg 补 0 (网页显示 --),
+//   epoch 补 0 表示测量日期未知 (无法参与趋势分析)
 #include <Arduino.h>
 #include <Preferences.h>
 #include <stddef.h>
@@ -38,6 +39,7 @@ static float accV = 0.0f;               // 光照 (窗口均值 ADC 码) 累加
 static float bestEnergy = -1.0f;        // 频谱能量最大窗口
 static float bestFreq = 0.0f;
 static char runLabel[32];
+static uint32_t runEpoch = 0;           // 本次测量的真实时刻 (浏览器传入; 0=未知, 完成时回落 NTP)
 
 // 最近一次完成的结果 (供网页层取走)
 static bool resultPending = false;
@@ -63,7 +65,12 @@ void classroomBegin(void)
         char key[8];
         snprintf(key, sizeof(key), "r%u", i);
         size_t got = prefs.getBytes(key, &recs[i], sizeof(ClassroomRecord));
-        if (got == offsetof(ClassroomRecord, vavgMean))
+        if (got == offsetof(ClassroomRecord, epoch))
+        {
+            // 76B blob: v1.1 (有 vavg, 无 epoch) → 测量日期未知
+            recs[i].epoch = 0;
+        }
+        else if (got == offsetof(ClassroomRecord, vavgMean))
         {
             // 72B blob: v0.8~v0.9 (有 windows/svm, 无 vavg)
             recs[i].vavgMean = 0;
@@ -90,7 +97,7 @@ void classroomBegin(void)
 }
 
 // ---------------- 控制 ----------------
-bool classroomStart(const char *label, uint16_t windows)
+bool classroomStart(const char *label, uint16_t windows, uint32_t epoch)
 {
     if (running || recCount >= CLS_MAX_RECORDS)
         return false;
@@ -104,6 +111,7 @@ bool classroomStart(const char *label, uint16_t windows)
     running = true;
     runWindows = 0;
     runTarget = windows;
+    runEpoch = epoch;
     accM = accMMax = accFI = accPst = accPstMax = accSvm = accSvmMax = accV = 0.0f;
     bestEnergy = -1.0f;
     bestFreq = 0.0f;
@@ -189,6 +197,7 @@ bool classroomOnWindow(const FlickerSnapshot *s)
     r.svmMax  = accSvmMax;
     r.vavgMean = (uint16_t)(accV / (float)runTarget + 0.5f);
     r.freq    = bestFreq;
+    r.epoch   = runEpoch ? runEpoch : cloudEpoch();   // 浏览器时间优先; 否则用 NTP 校时 (无网则 0=日期未知)
     r.verdict = flickerVerdict(r.pstMean, r.svmMean, (float)r.vavgMean);
 
     recs[recCount++] = r;

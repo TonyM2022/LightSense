@@ -25,14 +25,16 @@ typedef struct {
     float    svmMean;            // SVM 均值 (判定用 ≤0.4; 旧记录为 0 → 网页显示 --)
     float    svmMax;             // SVM 峰值 (仅展示)
     uint16_t vavgMean;           // 光照均值 ADC 码 (v1.1 判定前置量程检查用; 旧记录为 0 → 网页显示 --)
+    uint32_t epoch;              // 真实测量时刻 Unix 秒 (浏览器传入或 NTP 校时; 0 = 未知, 旧记录无此字段)
 } ClassroomRecord;
 
-// 初始化: 从 NVS 加载历史记录 (按 blob 长度兼容 v0.7.1 64B / v0.8~v0.9 72B / 当前 74B)
+// 初始化: 从 NVS 加载历史记录 (按 blob 长度兼容 v0.7.1 64B / v0.8~v0.9 72B / v1.1 76B / 当前 80B)
 void classroomBegin(void);
 
 // 开始一次测量 (运行中或记录已满返回 false)
 // label 为 NULL/空串时自动命名 "灯具 N"; windows 取 CLS_WINDOWS / _1MIN / _10MIN 之一
-bool classroomStart(const char *label, uint16_t windows);
+// epoch: 本次测量的真实 Unix 秒 (网页传浏览器时间); 传 0 表示未知, 完成时回落到 NTP 校时值
+bool classroomStart(const char *label, uint16_t windows, uint32_t epoch = 0);
 
 // 是否正在测量
 bool classroomIsRunning(void);

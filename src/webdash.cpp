@@ -4,7 +4,7 @@
 //   WS  /ws   → 每报告窗口广播一次 JSON 快照 (指标 + 波形包络 + 频谱 + 教室进度)
 //   GET /led  → 查询/设置 LED 输出模式 (?mode=const|50hz|100hz|500hz|1khz|5khz|off)
 //   GET  /api/classroom        → 教室测量状态 + 记录列表
-//   POST /api/classroom/start  → 开始测量 (?label=灯具标签&dur=30|60|600 秒)
+//   POST /api/classroom/start  → 开始测量 (?label=灯具标签&dur=30|60|600 秒&t=Unix秒)
 //   POST /api/classroom/clear  → 清空记录 (同时清云端同步位图)
 //   GET  /setup  POST /setup   → OneNET 云端配网页 (WiFi/产品/设备/Token 存 NVS)
 //   GET  /api/cloud            → 云端配置回显 + 连接状态
@@ -67,10 +67,40 @@ canvas{width:100%;height:180px;display:block}
 .vchip{font-weight:600}
 .btn2{display:flex;gap:8px;margin-top:10px}
 .btn2 button{background:var(--bg);border:1px solid var(--edge);color:var(--txt);font-size:13px;padding:7px 14px;border-radius:8px;cursor:pointer}
+/* ---- 大屏演示模式 (body.big): 投影/大屏展示时放大字号、曲线与表格 ---- */
+.bigbtn{margin-left:auto;background:var(--card);border:1px solid var(--edge);color:var(--dim);font-size:12px;padding:6px 12px;border-radius:8px;cursor:pointer;font-weight:600}
+.bigbtn.on{border-color:#f0883e;color:#f0883e;background:rgba(240,136,62,.12)}
+body.big{padding:22px 26px;max-width:1800px}
+body.big h1{font-size:30px;margin-bottom:18px}
+body.big .card{padding:16px 20px}
+body.big .cards{grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}
+body.big .label{font-size:17px;margin-bottom:8px}
+body.big .value{font-size:38px!important}
+body.big .value small{font-size:18px}
+body.big .meta{font-size:16px}
+body.big .wide{margin-bottom:14px}
+body.big canvas{height:340px}
+body.big .nav button{font-size:21px;padding:16px 0}
+body.big .btns{grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+body.big .btns button{font-size:21px;padding:22px 0}
+body.big .tbl{font-size:17px}
+body.big .tbl th{font-size:16px}
+body.big .tbl th,body.big .tbl td{padding:10px 6px}
+body.big .cls-row input,body.big .cls-row select{font-size:19px;padding:13px 12px}
+body.big .cls-row button{font-size:19px;padding:13px 28px}
+body.big .btn2 button{font-size:17px;padding:11px 20px}
+/* ---- 灯具趋势分析 (同一标签 = 同一灯具; 时间轴折线 + 稳健回归 + 越限预测) ---- */
+#trend{height:240px}
+body.big #trend{height:360px}
+.trend-w{font-size:13px;padding:9px 11px;border-radius:8px;margin-top:8px;border:1px solid var(--edge);color:var(--dim)}
+.w-red{border-color:#f85149;color:#f85149;background:rgba(248,81,73,.10)}
+.w-org{border-color:#f0883e;color:#f0883e;background:rgba(240,136,62,.10)}
+.w-grn{border-color:#3fb950;color:#3fb950;background:rgba(63,185,80,.10)}
+body.big .trend-w{font-size:17px;padding:12px 14px}
 </style>
 </head>
 <body>
-<h1>LightSense 频闪仪<span id="conn" class="dot"></span></h1>
+<h1>LightSense 频闪仪<span id="conn" class="dot"></span><button id="bigbtn" class="bigbtn" onclick="toggleBig()">演示模式</button></h1>
 <nav class="nav">
   <button id="tab-meter" class="act" onclick="showPage('meter')">频闪仪</button>
   <button id="tab-led" onclick="showPage('led')">LED 控制</button>
@@ -117,7 +147,8 @@ canvas{width:100%;height:180px;display:block}
         <option value="60">1 min</option>
         <option value="600">10 min</option>
       </select>
-      <input id="clslbl" maxlength="20" placeholder="例如: 第3排靠窗 / 讲台正中">
+      <input id="clslbl" maxlength="20" list="lbllist" placeholder="例如: 第3排靠窗 / 讲台正中">
+      <datalist id="lbllist"></datalist>
       <button id="clsbtn" onclick="clsStart()">开始测量</button>
     </div>
     <div class="pwrap"><div class="pbar" id="clspbar"></div></div>
@@ -140,6 +171,21 @@ canvas{width:100%;height:180px;display:block}
     <div class="meta" id="clslbl2" style="margin-top:8px">尚未测量</div>
   </div>
   <div class="card wide">
+    <div class="label">灯具趋势分析 (同一标签 = 同一灯具 · 随时间变化与恶化预警)</div>
+    <div class="cls-row">
+      <select id="trLbl" onchange="trPick()"></select>
+      <select id="trMet" onchange="trPick()">
+        <option value="p">Pst^LM 均值 (限值 1.0)</option>
+        <option value="s">SVM 均值 (限值 0.4)</option>
+        <option value="m">波动深度 m 均值</option>
+        <option value="va">光照均值 ADC</option>
+      </select>
+    </div>
+    <canvas id="trend"></canvas>
+    <div class="meta" id="trStat" style="margin-top:8px">--</div>
+    <div id="trWarn"></div>
+  </div>
+  <div class="card wide">
     <div class="label">测量记录 (<span id="clscnt">0</span> 条, 断电保存)</div>
     <table class="tbl" id="clstbl"></table>
     <div class="btn2">
@@ -149,12 +195,12 @@ canvas{width:100%;height:180px;display:block}
   </div>
   <div class="card wide">
     <div class="label">说明与局限</div>
-    <div class="meta">判定口径 (v1.1): 光照前置检查 (窗口均值 ADC 码 &lt;400 光线过暗 / &gt;3000 光线太亮, 此时 Pst/SVM 无效) → Pst^LM 取本次测量均值 ≤ 1 (IEC TR 61547-1), SVM 取本次测量均值 ≤ 0.4 (IEC TR 63158, EU 2024 生态设计限值); 波动深度与主频仅展示不判定。局限: ① 单测点只反映测点位置光照, 教室验收应多点测量 (中心+四角) 并用标签区分; ② 30s/1min 档 Pst^LM 为短时估计, 标准口径 10min (可选 10min 档); ③ 4.88Hz 频率分辨率, &lt;15Hz 主频精度有限; ④ 旧版本记录为旧口径判定或无 SVM/光照, 建议清空重测。</div>
+    <div class="meta">判定口径 (v1.1): 光照前置检查 (窗口均值 ADC 码 &lt;400 光线过暗 / &gt;3000 光线太亮, 此时 Pst/SVM 无效) → Pst^LM 取本次测量均值 ≤ 1 (IEC TR 61547-1), SVM 取本次测量均值 ≤ 0.4 (IEC TR 63158, EU 2024 生态设计限值); 波动深度与主频仅展示不判定。局限: ① 单测点只反映测点位置光照, 教室验收应多点测量 (中心+四角) 并用标签区分; ② 30s/1min 档 Pst^LM 为短时估计, 标准口径 10min (可选 10min 档); ③ 4.88Hz 频率分辨率, &lt;15Hz 主频精度有限; ④ 旧版本记录为旧口径判定或无 SVM/光照, 建议清空重测; ⑤ 同一灯具定期复查请填写完全相同的标签 (输入框提供历史标签下拉), 才会被趋势分析归为同一灯具; 趋势分析只用带日期的记录 —— 网页发起的测量自动带浏览器日期, 联网 (已配 OneNET WiFi) 时按键发起的测量也带日期。</div>
   </div>
 </section>
 <script>
 const $=id=>document.getElementById(id);
-let ws=null,tmr=null,lastFreq=0;
+let ws=null,tmr=null,lastFreq=0,lastD=null;
 
 // ---------------- 页面切换 ----------------
 function showPage(p){
@@ -162,6 +208,7 @@ function showPage(p){
     $('pg-'+id).style.display=(id===p)?'':'none';
     $('tab-'+id).classList.toggle('act',id===p);
   }
+  if(p==='cls')drawTrend();                 // 趋势图在隐藏状态下无法量取尺寸, 切到本页时重绘
 }
 
 // ---------------- LED 模式控制 ----------------
@@ -213,16 +260,191 @@ function paintClsRes(r){
   $('clssvm').textContent=(r.s!=null)?r.s.toFixed(3):'--';
   $('clssvmx').textContent=(r.sx!=null)?r.sx.toFixed(3):'--';
   $('clsvavg').textContent=(r.va!=null)?r.va:'--';
-  $('clslbl2').textContent='标签: '+r.lb+' · 测量于开机 T+'+r.ts+' s · 主频取频谱能量最大窗口';
+  const dt=r.tea?new Date(r.tea*1000):null;
+  $('clslbl2').textContent='标签: '+r.lb+' · 测量于 '+(dt?(ymd(dt)+' '+dt.toTimeString().slice(0,5)):'开机 T+'+r.ts+' s')+
+                            ' · 主频取频谱能量最大窗口';
 }
 function paintClsTable(){
-  let h='<tr><th>#</th><th>标签</th><th>时长</th><th>主频</th><th>m 均值</th><th>m 峰值</th><th>Pst 均值</th><th>SVM 均值</th><th>光照</th><th>判定</th></tr>';
+  let h='<tr><th>#</th><th>日期</th><th>标签</th><th>时长</th><th>主频</th><th>m 均值</th><th>m 峰值</th><th>Pst 均值</th><th>SVM 均值</th><th>光照</th><th>判定</th></tr>';
   clsList.forEach((r,i)=>{
-    h+='<tr><td>'+(i+1)+'</td><td>'+esc(r.lb)+'</td><td>'+durName(r.w||29)+'</td><td>'+r.f.toFixed(1)+' Hz</td><td>'+r.m.toFixed(2)+'%</td><td>'+r.mx.toFixed(2)+'%</td><td>'+r.p.toFixed(3)+'</td><td>'+(r.s!=null?r.s.toFixed(3):'--')+'</td><td>'+(r.va!=null?r.va:'--')+'</td><td class="vchip '+(VCLS[r.v]||'')+'">'+(VNAME[r.v]||'--')+'</td></tr>';
+    h+='<tr><td>'+(i+1)+'</td><td>'+(r.tea?ymd(new Date(r.tea*1000)):'--')+'</td><td>'+esc(r.lb)+'</td><td>'+durName(r.w||29)+'</td><td>'+r.f.toFixed(1)+' Hz</td><td>'+r.m.toFixed(2)+'%</td><td>'+r.mx.toFixed(2)+'%</td><td>'+r.p.toFixed(3)+'</td><td>'+(r.s!=null?r.s.toFixed(3):'--')+'</td><td>'+(r.va!=null?r.va:'--')+'</td><td class="vchip '+(VCLS[r.v]||'')+'">'+(VNAME[r.v]||'--')+'</td></tr>';
   });
   $('clstbl').innerHTML=h;
   $('clscnt').textContent=clsList.length;
+  const ls=[...new Set(clsList.map(r=>r.lb))];      // 历史标签下拉: 同一灯具复查请填写完全相同的标签
+  $('lbllist').innerHTML=ls.map(l=>'<option value="'+esc(l)+'"></option>').join('');
 }
+
+// ---------------- 灯具趋势分析 (同一标签 = 同一灯具; 稳健回归 + 越限预测) ----------------
+// 只用带真实日期 (tea) 的记录; 斜率用 Theil-Sen (两两斜率取中位数, 抗单点异常),
+// 变化速率按"每周"表述 (与测量周期无关), 越限预测 = 线性外推到限值的预计天数
+const TRM={
+  p :{n:'Pst^LM',u:'',lim:1.0,noise:0.03,dec:3,get:r=>r.p},
+  s :{n:'SVM',u:'',lim:0.4,noise:0.015,dec:3,get:r=>r.s},
+  m :{n:'波动深度 m',u:'%',lim:null,noise:1.0,dec:2,get:r=>r.m},
+  va:{n:'光照均值',u:' ADC',lim:null,noise:25,dec:0,get:r=>r.va}
+};
+let trLbl='',trMet='p',trCur=null,trCurM=TRM.p;
+
+const pad2=n=>String(n).padStart(2,'0');
+const ymd=d=>d?(d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())):'';
+const md=d=>d?((d.getMonth()+1)+'-'+pad2(d.getDate())):'--';
+function median(a){const b=a.slice().sort((x,y)=>x-y);return b.length?b[b.length>>1]:0;}
+function theilSen(xs,ys){
+  const sl=[];
+  for(let i=0;i<xs.length;i++)for(let j=i+1;j<xs.length;j++){
+    const dx=xs[j]-xs[i];
+    if(dx>0)sl.push((ys[j]-ys[i])/dx);
+  }
+  const b=sl.length?median(sl):0;
+  return {b:b,a:median(xs.map((x,i)=>ys[i]-b*x))};
+}
+function trGroups(){
+  const g={};
+  clsList.forEach(r=>{if(!r.tea)return;(g[r.lb]=g[r.lb]||[]).push(r);});
+  for(const k in g)g[k].sort((a,b)=>a.tea-b.tea);
+  return g;
+}
+// 拟合: pts=[{d:Date,y:数值,r:记录}]; 样本 <3 或跨度 0 时 ok=false (只画点, 不给趋势结论)
+function trFit(pts,M){
+  const t0=pts[0].d.getTime();
+  const xs=pts.map(p=>(p.d.getTime()-t0)/86400000),ys=pts.map(p=>p.y);
+  const o={pts:pts,xs:xs,ys:ys,span:xs[xs.length-1],n:pts.length,d0:pts[0].d,d1:pts[pts.length-1].d,last:ys[ys.length-1],ok:false};
+  if(pts.length>=3&&o.span>0){
+    const f=theilSen(xs,ys),res=ys.map((y,i)=>y-(f.a+f.b*xs[i]));
+    const ym=ys.reduce((a,b)=>a+b,0)/ys.length;
+    let ss=0,st=0;
+    res.forEach((e,i)=>{ss+=e*e;st+=(ys[i]-ym)*(ys[i]-ym);});
+    o.a=f.a;o.b=f.b;o.perWeek=f.b*7;o.mad=median(res.map(Math.abs));
+    o.r2=st>0?1-ss/st:1;o.ok=true;
+    o.level=trLevel(o,M);o.days=trPredict(o,M);
+  }
+  return o;
+}
+function trLevel(f,M){
+  const w=f.perWeek;
+  if(Math.abs(w)<M.noise)return {k:'flat',t:'稳定 (无显著变化)'};
+  const adv=w>0;
+  if(Math.abs(w)>=3*M.noise)return {k:adv?'bad':'good',t:adv?'明显恶化':'明显改善'};
+  return {k:adv?'warn':'good',t:adv?'缓慢恶化':'缓慢改善'};
+}
+function trPredict(f,M){
+  if(!f.ok||M.lim==null||f.b<=0)return null;   // 未上升 → 不作越限预测
+  if(f.last>=M.lim)return 0;                   // 已越限
+  return (M.lim-f.last)/f.b;                   // 按当前速率越限所需天数
+}
+function trPick(){trLbl=$('trLbl').value;trMet=$('trMet').value;trAnalyze();}
+function trRefresh(){
+  const g=trGroups(),keys=Object.keys(g).sort();
+  if(!keys.length){
+    $('trLbl').innerHTML='<option value="">— 无带日期的记录 —</option>';
+    trLbl='';trCur=null;trAnalyze();return;
+  }
+  if(!keys.includes(trLbl))trLbl=keys[keys.length-1];       // 默认选最近一次测量的灯具
+  $('trLbl').innerHTML=keys.map(k=>'<option value="'+esc(k)+'">'+esc(k)+' ('+g[k].length+' 次)</option>').join('');
+  $('trLbl').value=trLbl;
+  trAnalyze();
+}
+function trAnalyze(){
+  const g=trGroups(),rs=g[trLbl]||[],M=TRM[trMet];
+  const pts=rs.filter(r=>M.get(r)!=null).map(r=>({d:new Date(r.tea*1000),y:+M.get(r),r:r}));
+  trCurM=M;
+  trCur=pts.length?trFit(pts,M):null;
+  const fx=n=>n.toFixed(M.dec);
+  if(!trCur){
+    $('trStat').textContent='该灯具暂无带日期的记录 (从网页开始测量会自动记录日期)';
+  }else{
+    const f=trCur;
+    let s='样本 '+f.n+' 次 · 跨度 '+f.span.toFixed(1)+' 天 ('+ymd(f.d0)+' ~ '+ymd(f.d1)+')';
+    if(f.ok){
+      s+=' · 变化速率 '+(f.perWeek>=0?'+':'')+fx(f.perWeek)+M.u+'/周 · R² '+f.r2.toFixed(2)+' · 趋势: '+f.level.t;
+      if(M.lim!=null)s+=' · 限值 '+M.lim;
+    }else{
+      s+=' · 样本不足, 暂不出趋势结论 (需 ≥3 次且时间跨度 >0 天)';
+    }
+    $('trStat').textContent=s;
+  }
+  // 预警条: 超标 / 恶化趋势与越限预测 / 光衰 / 稳定
+  const W=[],f=trCur,last=rs[rs.length-1];
+  if(last&&(last.v===1||last.v>=2))
+    W.push(['w-red','最近一次测量 ('+ymd(new Date(last.tea*1000))+') 判定为「'+(VNAME[last.v]||'--')+'」, 建议现场复核']);
+  if(f&&f.ok&&f.level.k!=='flat'){
+    const rate=(f.perWeek>=0?'+':'')+fx(f.perWeek)+M.u+'/周';
+    if(f.perWeek>0){
+      let t=M.n+' 呈上升趋势 ('+rate+')';
+      if(f.days===0)t+=' · 已越过限值 '+M.lim;
+      else if(f.days!=null){
+        const dd=new Date(Date.now()+f.days*86400000);
+        t+=' · 按此速率预计 '+Math.max(1,Math.round(f.days/7))+' 周后 ('+ymd(dd)+') 越过限值 '+M.lim;
+      }
+      W.push([f.level.k==='bad'?'w-red':'w-org',t]);
+    }else{
+      W.push(['w-grn',M.n+' 呈下降趋势 ('+rate+'), 指标在改善']);
+    }
+  }
+  // 光衰检查 (与所选指标无关, 始终执行): 光照均值下降往往早于频闪指标恶化出现
+  const vp=rs.filter(r=>r.va!=null).map(r=>({d:new Date(r.tea*1000),y:+r.va,r:r}));
+  const vf=vp.length?trFit(vp,TRM.va):null;
+  if(vf&&vf.ok&&vf.perWeek<0&&Math.abs(vf.perWeek)>=TRM.va.noise)
+    W.push(['w-org','光照均值以 '+vf.perWeek.toFixed(0)+' ADC/周 下降 (累计 '+Math.abs(vf.b*vf.span).toFixed(0)+
+            ' ADC), 提示灯具光衰或积灰, 建议清洁灯具后复测确认']);
+  if(!W.length&&f&&f.ok)
+    W.push(['w-grn','近 '+f.n+' 次测量指标稳定 (跨度 '+f.span.toFixed(1)+' 天), 未见恶化迹象']);
+  $('trWarn').innerHTML=W.map(x=>'<div class="trend-w '+x[0]+'">'+esc(x[1])+'</div>').join('');
+  drawTrend();
+}
+function drawTrend(){
+  const cv=$('trend');if(!cv)return;
+  const c=setup(cv),ctx=c.ctx,w=c.w,h=c.h;
+  if(!w||!h)return;
+  const S=SC(),M=trCurM,f=trCur;
+  const L=Math.round(46*S),R=Math.round(14*S),T=Math.round(12*S),B=Math.round(22*S),gw=w-L-R,gh=h-T-B;
+  ctx.font=(10*S)+'px monospace';ctx.lineWidth=1;
+  if(!f){
+    ctx.fillStyle='#8b949e';ctx.fillText('无数据 (该标签暂无带日期的记录)',L,T+gh/2);
+    return;
+  }
+  const span=Math.max(f.span,1e-9),day=dt=>(dt.getTime()-f.d0.getTime())/86400000;
+  let lo=Math.min(...f.ys),hi=Math.max(...f.ys);
+  if(M.lim!=null){lo=Math.min(lo,M.lim);hi=Math.max(hi,M.lim);}
+  let pad=(hi-lo)*0.18;if(!(pad>0))pad=Math.max(0.1,Math.abs(hi)*0.1);
+  lo-=pad;hi+=pad;
+  if(trMet==='va')lo=Math.max(0,lo);
+  const X=dt=>L+gw*Math.min(1,Math.max(0,day(dt)/span)),Y=v=>T+gh*(1-(v-lo)/(hi-lo));
+  ctx.strokeStyle='#21262d';
+  for(let g=0;g<=4;g++){                                  // 横向网格 + Y 轴刻度
+    const v=lo+(hi-lo)*g/4,yy=Math.round(Y(v))+.5;
+    ctx.beginPath();ctx.moveTo(L,yy);ctx.lineTo(w-R,yy);ctx.stroke();
+    ctx.fillStyle='#8b949e';ctx.fillText(v.toFixed(M.dec),3,yy+3);
+  }
+  ctx.fillStyle='#8b949e';
+  ctx.fillText(md(f.d0),L,h-6*S);                         // 首末日期 (X 轴)
+  ctx.fillText(md(f.d1),w-R-Math.round(30*S),h-6*S);
+  if(M.lim!=null&&M.lim>=lo&&M.lim<=hi){                  // 限值线
+    const yy=Math.round(Y(M.lim))+.5;
+    ctx.strokeStyle='#f85149';ctx.setLineDash([5,4]);
+    ctx.beginPath();ctx.moveTo(L,yy);ctx.lineTo(w-R,yy);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle='#f85149';ctx.fillText('限值 '+M.lim,w-R-Math.round(58*S),yy-4);
+  }
+  if(f.ok){                                               // 拟合线 (橙色虚线)
+    ctx.strokeStyle='#f0883e';ctx.setLineDash([5,4]);
+    ctx.beginPath();
+    ctx.moveTo(X(f.d0),Y(f.a));
+    ctx.lineTo(X(f.d1),Y(f.a+f.b*f.span));
+    ctx.stroke();ctx.setLineDash([]);
+  }
+  if(f.n>1){                                              // 时间轴折线
+    ctx.strokeStyle='#58a6ff';ctx.lineWidth=1.5;ctx.beginPath();
+    f.pts.forEach((p,i)=>{const x=X(p.d),y=Y(p.y);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+    ctx.stroke();ctx.lineWidth=1;
+  }
+  f.pts.forEach(p=>{                                      // 数据点: 合规绿 / 超标红
+    ctx.beginPath();ctx.arc(X(p.d),Y(p.y),3*S,0,Math.PI*2);
+    ctx.fillStyle=(p.r.v===0||p.r.v===4)?'#3fb950':'#f85149';
+    ctx.fill();
+  });
+}
+
 async function clsRefresh(){
   try{
     const r=await fetch('/api/classroom');
@@ -232,12 +454,15 @@ async function clsRefresh(){
     if(j.latest)paintClsRes(j.latest);
     $('clsbtn').disabled=!!j.run;
     if(!j.run)$('clspbar').style.width=(j.nwin>=(j.tot||29)?'100%':'0%');
+    trRefresh();
   }catch(e){}
 }
 async function clsStart(){
   const lbl=$('clslbl').value.trim(),dur=$('clsdur').value;
   try{
-    const r=await fetch('/api/classroom/start?label='+encodeURIComponent(lbl)+'&dur='+dur,{method:'POST'});
+    // t: 浏览器时间 (Unix 秒) → 记录真实测量日期, 供趋势分析使用 (设备离线也能带上日期)
+    const r=await fetch('/api/classroom/start?label='+encodeURIComponent(lbl)+'&dur='+dur+
+                        '&t='+Math.floor(Date.now()/1000),{method:'POST'});
     if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.err||r.status);}
     $('clsbtn').disabled=true;
     const wn={30:29,60:58,600:586}[dur]||29,dl=dur>=60?(dur/60)+' min':dur+' s';
@@ -251,8 +476,8 @@ async function clsClear(){
       $('clslbl2').textContent='尚未测量';}catch(e){alert('清空失败: '+e);}
 }
 function clsCsv(){
-  const rows=[['#','标签','时长','T+秒','主频Hz','m均值%','m峰值%','FlickerIndex','Pst均值','Pst峰值','SVM均值','SVM峰值','光照ADC','判定']];
-  clsList.forEach((r,i)=>rows.push([i+1,r.lb,durName(r.w||29),r.ts,r.f.toFixed(2),r.m.toFixed(2),r.mx.toFixed(2),r.fi.toFixed(3),r.p.toFixed(3),r.px.toFixed(3),(r.s!=null?r.s.toFixed(3):''),(r.sx!=null?r.sx.toFixed(3):''),(r.va!=null?r.va:''),VNAME[r.v]||'']));
+  const rows=[['#','标签','日期','时长','T+秒','主频Hz','m均值%','m峰值%','FlickerIndex','Pst均值','Pst峰值','SVM均值','SVM峰值','光照ADC','判定']];
+  clsList.forEach((r,i)=>rows.push([i+1,r.lb,(r.tea?ymd(new Date(r.tea*1000)):''),durName(r.w||29),r.ts,r.f.toFixed(2),r.m.toFixed(2),r.mx.toFixed(2),r.fi.toFixed(3),r.p.toFixed(3),r.px.toFixed(3),(r.s!=null?r.s.toFixed(3):''),(r.sx!=null?r.sx.toFixed(3):''),(r.va!=null?r.va:''),VNAME[r.v]||'']));
   const csv='\ufeff'+rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\r\n');
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
@@ -291,9 +516,28 @@ function connect(){
     catch(e){console.error('bad json:',String(ev.data).slice(0,120),e);}
   };
 }
+
+// ---------------- 大屏演示模式 (投影展示: 放大字号/曲线/表格) ----------------
+function applyBig(on){
+  document.body.classList.toggle('big',on);
+  $('bigbtn').classList.toggle('on',on);
+  try{localStorage.setItem('lsBig',on?'1':'0');}catch(e){}
+  if(lastD)render(lastD);                 // 立即按新尺寸重绘 canvas (setup() 会重取 clientHeight)
+  drawTrend();
+}
+function toggleBig(){applyBig(!document.body.classList.contains('big'));}
+// URL 参数 ?big=1 / ?big=0 优先, 否则沿用上次选择
+(function(){
+  let q=null,saved=null;
+  try{q=new URLSearchParams(location.search).get('big');}catch(e){}
+  try{saved=localStorage.getItem('lsBig');}catch(e){}
+  applyBig(q==='1'||(q!=='0'&&saved==='1'));
+})();
+
 connect();
 
 function render(d){
+  lastD=d;                                                 // 缓存末帧, 供大屏模式切换时立即重绘
   if(d.led!=null&&MODES[d.led])paintLed(MODES[d.led].p);   // 按键切换 LED 模式后同步高亮
   $('flk').textContent=d.flk.toFixed(2);
   $('fi').textContent=d.fi.toFixed(3);
@@ -314,6 +558,9 @@ function render(d){
   if(d.cls)clsUpdate(d.cls);
 }
 
+// 大屏模式绘图缩放系数 (canvas 内字号与边距随 body.big 放大)
+const SC=()=>document.body.classList.contains('big')?1.6:1;
+
 function setup(cv){
   const dpr=window.devicePixelRatio||1;
   const w=cv.clientWidth,h=cv.clientHeight;
@@ -328,9 +575,9 @@ function setup(cv){
 
 function drawWave(wmn,wmx){
   const c=setup($('wave')),ctx=c.ctx,w=c.w,h=c.h;
-  const L=46,R=10,T=10,B=20,gw=w-L-R,gh=h-T-B;
+  const L=Math.round(46*SC()),R=10,T=Math.round(10*SC()),B=Math.round(20*SC()),gw=w-L-R,gh=h-T-B;
   const y=v=>T+gh*(1-v/4095);
-  ctx.font='10px monospace';ctx.lineWidth=1;
+  ctx.font=(10*SC())+'px monospace';ctx.lineWidth=1;
   for(let g=0;g<=4;g++){
     const v=(g===4)?4095:g*1024,yy=Math.round(y(v))+.5;
     ctx.strokeStyle='#21262d';
@@ -351,25 +598,25 @@ function drawWave(wmn,wmx){
     ctx.stroke();
   }
   ctx.fillStyle='#8b949e';
-  ctx.fillText('0 ms',L,h-6);
-  ctx.fillText('204.8 ms',w-R-52,h-6);
+  ctx.fillText('0 ms',L,h-6*SC());
+  ctx.fillText('204.8 ms',w-R-Math.round(52*SC()),h-6*SC());
 }
 
 function drawSpec(sp){
   const c=setup($('spec')),ctx=c.ctx,w=c.w,h=c.h;
-  const L=46,R=10,T=10,B=20,gw=w-L-R,gh=h-T-B;
+  const L=Math.round(46*SC()),R=10,T=Math.round(10*SC()),B=Math.round(20*SC()),gw=w-L-R,gh=h-T-B;
   // 对数横轴: 后端频谱点已按对数频带分组 (4.883 Hz ~ 5 kHz), 组号线性 = 对数线性
   const FMIN=4.883,FMAX=5000,xg=f=>L+gw*Math.log(f/FMIN)/Math.log(FMAX/FMIN);
-  ctx.font='10px monospace';ctx.lineWidth=1;
+  ctx.font=(10*SC())+'px monospace';ctx.lineWidth=1;
   ctx.strokeStyle='#21262d';
   ctx.beginPath();ctx.moveTo(Math.round(L)+.5,T);ctx.lineTo(Math.round(L)+.5,T+gh);
   ctx.moveTo(w-R-.5,T);ctx.lineTo(w-R-.5,T+gh);ctx.stroke();
   for(const f of [10,100,1000]){
     const x=Math.round(xg(f))+.5;
     ctx.beginPath();ctx.moveTo(x,T);ctx.lineTo(x,T+gh);ctx.stroke();
-    ctx.fillStyle='#8b949e';ctx.fillText(f>=1000?'1k':''+f,x-6,h-6);
+    ctx.fillStyle='#8b949e';ctx.fillText(f>=1000?'1k':''+f,x-6*SC(),h-6*SC());
   }
-  ctx.fillStyle='#8b949e';ctx.fillText('5k',w-R-14,h-6);
+  ctx.fillStyle='#8b949e';ctx.fillText('5k',w-R-14*SC(),h-6*SC());
   if(!sp||!sp.length)return;
   let mx=0;for(const v of sp)if(v>mx)mx=v;
   if(mx<=0)mx=1;
@@ -554,7 +801,7 @@ bool webdashBegin(void)
     // 教室测量: 状态 + 记录列表
     server.on("/api/classroom", HTTP_GET, [](AsyncWebServerRequest *req)
     {
-        static char cb[9 * 1024];       // 仅 async_tcp 任务调用, 单线程安全
+        static char cb[12 * 1024];      // 仅 async_tcp 任务调用, 单线程安全 (50 条记录 + epoch 字段留余量)
         uint16_t nR = 0;
         const ClassroomRecord *rs = classroomRecords(&nR);
         int n = snprintf(cb, sizeof(cb),
@@ -566,13 +813,16 @@ bool webdashBegin(void)
         {
             char lb[80];
             jsonEscape(lb, sizeof(lb), rs[i].label);
-            char sv[56];
+            char sv[88];
             sv[0] = 0;
             if (rs[i].svmMean > 0.0f)    // 旧版本记录 svmMean==0 → 不输出 s/sx, 前端显示 --
                 snprintf(sv, sizeof(sv), ",\"s\":%.3f,\"sx\":%.3f", rs[i].svmMean, rs[i].svmMax);
             if (rs[i].vavgMean > 0)      // v1.0 及以前记录无光照 → 不输出 va, 前端显示 --
                 snprintf(sv + strlen(sv), sizeof(sv) - strlen(sv), ",\"va\":%u",
                          (unsigned)rs[i].vavgMean);
+            if (rs[i].epoch)             // 无真实日期 (旧记录/未校时) → 不输出 tea, 前端排除在趋势外
+                snprintf(sv + strlen(sv), sizeof(sv) - strlen(sv), ",\"tea\":%lu",
+                         (unsigned long)rs[i].epoch);
             n += snprintf(cb + n, sizeof(cb) - n,
                           "%s{\"i\":%u,\"lb\":\"%s\",\"ts\":%lu,\"w\":%u,\"m\":%.2f,\"mx\":%.2f,"
                           "\"fi\":%.3f,\"p\":%.3f,\"px\":%.3f,\"f\":%.2f,\"v\":%u%s}",
@@ -588,13 +838,16 @@ bool webdashBegin(void)
             const ClassroomRecord *L = &rs[nR - 1];
             char lb[80];
             jsonEscape(lb, sizeof(lb), L->label);
-            char sv[56];
+            char sv[88];
             sv[0] = 0;
             if (L->svmMean > 0.0f)
                 snprintf(sv, sizeof(sv), ",\"s\":%.3f,\"sx\":%.3f", L->svmMean, L->svmMax);
             if (L->vavgMean > 0)
                 snprintf(sv + strlen(sv), sizeof(sv) - strlen(sv), ",\"va\":%u",
                          (unsigned)L->vavgMean);
+            if (L->epoch)
+                snprintf(sv + strlen(sv), sizeof(sv) - strlen(sv), ",\"tea\":%lu",
+                         (unsigned long)L->epoch);
             n += snprintf(cb + n, sizeof(cb) - n,
                           "{\"lb\":\"%s\",\"m\":%.2f,\"mmax\":%.2f,\"fi\":%.3f,"
                           "\"pst\":%.3f,\"pstmax\":%.3f,\"freq\":%.2f,\"v\":%u,\"ts\":%lu,\"w\":%u%s}",
@@ -610,7 +863,8 @@ bool webdashBegin(void)
         req->send(200, "application/json", cb);
     });
 
-    // 教室测量: 开始一次测量 (?label=灯具标签, ?dur=30|60|600 秒, 均可省略, 默认 30s 档)
+    // 教室测量: 开始一次测量 (?label=灯具标签, ?dur=30|60|600 秒, ?t=Unix秒, 均可省略, 默认 30s 档)
+    // t 由网页用浏览器时间填入 (设备离线也能记录真实测量日期); 缺省时完成时回落 NTP 校时
     server.on("/api/classroom/start", HTTP_POST, [](AsyncWebServerRequest *req)
     {
         String label = "";
@@ -624,7 +878,13 @@ bool webdashBegin(void)
             if (dur >= 300)      wins = CLS_WINDOWS_10MIN;
             else if (dur >= 60)  wins = CLS_WINDOWS_1MIN;
         }
-        if (!classroomStart(label.c_str(), wins))
+        uint32_t epoch = 0;                       // 合理区间 (2020-09 ~ 2106) 之外的取值视为无效
+        if (req->hasParam("t"))
+        {
+            long tv = req->getParam("t")->value().toInt();
+            if (tv > 1600000000L) epoch = (uint32_t)tv;
+        }
+        if (!classroomStart(label.c_str(), wins, epoch))
         {
             req->send(409, "application/json", "{\"err\":\"busy or records full\"}");
             return;

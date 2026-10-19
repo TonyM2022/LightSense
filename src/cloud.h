@@ -34,6 +34,10 @@ void cloudResetSync(void);
 CloudState cloudGetState(void);
 const char *cloudStateName(void);
 
+// 当前 Unix 时间 (秒): STA 联网后由 NTP 校时得到, 未联网/未同步返回 0
+// 用途: 教室记录带上真实测量日期 (网页也可用浏览器时间覆盖, 见 classroomStart 第 3 参)
+uint32_t cloudEpoch(void);
+
 // 读取当前配置 (网页 /api/cloud 回显用), 返回是否已配置
 bool cloudCfgGet(char *ssid, size_t ss, char *pass, size_t ps,
                  char *pid, size_t pp, char *dev, size_t ds, char *tok, size_t ts);
