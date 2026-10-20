@@ -166,7 +166,53 @@ static void drawClassroomPage(void)
         return;
     }
 
-    // 空闲: 三档时长选择 (上下键循环, 反白光标) + 开始提示
+    // 空闲: 巡检进行中显示任务/待测点位 (上下键仍选时长) / 否则三档时长选择 (上下键循环, 反白光标)
+    const InspectionTask *it = classroomInspectTask();
+    if (it)
+    {
+        snprintf(buf, sizeof(buf), "教室 %s  %u/5", it->room, (unsigned)it->pointsCount);
+        u8g2.drawUTF8(4, 26, buf);
+        uint8_t nx = classroomInspectNextPoint();
+        if (nx)
+            snprintf(buf, sizeof(buf), "待测 %s %s", classroomPointCode(nx), classroomPointName(nx));
+        else
+            snprintf(buf, sizeof(buf), "5 点已测完");
+        u8g2.drawUTF8(4, 42, buf);
+        if (nx)
+            snprintf(buf, sizeof(buf), "OK:测此点 %s", DUR_NAMES[s_durSel]);   // 时长随上下键改变
+        else
+            snprintf(buf, sizeof(buf), "OK:结束巡检");
+        u8g2.drawUTF8(4, 60, buf);
+        return;
+    }
+
+    // 上次已完成的巡检: 显示教室级结论简版 (M2 设备端汇总; 上下键仍可改时长)
+    uint16_t nt = 0;
+    const InspectionTask *ts = classroomTasks(&nt);
+    const InspectionTask *last = NULL;
+    for (uint16_t i = 0; i < nt; i++)
+        if (ts[i].status == INSP_ST_DONE && ts[i].pointsCount > 0)
+            last = &ts[i];
+    if (last)
+    {
+        ClassroomSummary sm;
+        classroomSummarize(last->id, &sm);
+        snprintf(buf, sizeof(buf), "上次 %s %u/5", last->room, (unsigned)sm.points);
+        u8g2.drawUTF8(4, 26, buf);
+        if (sm.verdict == CLS_SUM_PASS)
+            snprintf(buf, sizeof(buf), "A 合规 5 点全通过");
+        else if (sm.verdict == CLS_SUM_LOCAL)
+            snprintf(buf, sizeof(buf), "B 局部 %u点 %s", (unsigned)sm.failCnt, classroomPointName(sm.worstCode));
+        else if (sm.verdict == CLS_SUM_ALL)
+            snprintf(buf, sizeof(buf), "C 整体 %u点 %s", (unsigned)sm.failCnt, classroomPointName(sm.worstCode));
+        else
+            snprintf(buf, sizeof(buf), "未测全, 无教室结论");
+        u8g2.drawUTF8(4, 42, buf);
+        snprintf(buf, sizeof(buf), "OK:开始测量 %s", DUR_NAMES[s_durSel]);
+        u8g2.drawUTF8(4, 60, buf);
+        return;
+    }
+
     u8g2.drawUTF8(4, 26, "测量时长:");
     const int xs[3] = {4, 46, 94};
     for (int i = 0; i < 3; i++)
@@ -240,7 +286,18 @@ void oledHandleKey(uint8_t ev)
         }
         else if (s_page == 2 && !classroomIsRunning())
         {
-            classroomStart(NULL, DUR_WINDOWS[s_durSel]);   // NULL → 自动命名灯具 N
+            if (classroomInspectActive())            // 巡检进行中: 测下一个点位 / 5 点齐全则结束巡检
+            {
+                uint8_t nx = classroomInspectNextPoint();
+                if (nx)
+                    classroomInspectStartPoint(nx, DUR_WINDOWS[s_durSel], 0);  // epoch 0 → 完成时回落 NTP 校时
+                else
+                    classroomInspectFinish();
+            }
+            else
+            {
+                classroomStart(NULL, DUR_WINDOWS[s_durSel]);   // NULL → 自动命名灯具 N
+            }
         }
         break;                              // 页 3 运行中确认忽略 (防误触重启)
     default:

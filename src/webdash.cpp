@@ -5,7 +5,12 @@
 //   GET /led  → 查询/设置 LED 输出模式 (?mode=const|50hz|100hz|500hz|1khz|5khz|off)
 //   GET  /api/classroom        → 教室测量状态 + 记录列表
 //   POST /api/classroom/start  → 开始测量 (?label=灯具标签&dur=30|60|600 秒&t=Unix秒)
-//   POST /api/classroom/clear  → 清空记录 (同时清云端同步位图)
+//                                ?pt=1..5 = 巡检测点 (标签由设备按 <教室号>-<点位码> 生成)
+//   POST /api/classroom/clear  → 清空记录 (同时清云端同步位图与巡检任务)
+//   GET  /api/inspect          → 教室巡检: 当前任务 + 任务列表 + 教室级汇总 sum (记录带 tid/pc 归属)
+//   POST /api/inspect/start    → 新建巡检 (?room=教室号&scene=场景&ins=巡检人&t=Unix秒)
+//   POST /api/inspect/abort    → 中止当前巡检任务
+//   POST /api/inspect/finish   → 结束当前巡检任务
 //   GET  /setup  POST /setup   → OneNET 云端配网页 (WiFi/产品/设备/Token 存 NVS)
 //   GET  /api/cloud            → 云端配置回显 + 连接状态
 //   GET  /api/wifiscan         → WiFi 异步扫描 (首次触发, 轮询取结果)
@@ -97,6 +102,23 @@ body.big #trend{height:360px}
 .w-org{border-color:#f0883e;color:#f0883e;background:rgba(240,136,62,.10)}
 .w-grn{border-color:#3fb950;color:#3fb950;background:rgba(63,185,80,.10)}
 body.big .trend-w{font-size:17px;padding:12px 14px}
+/* ---- 教室巡检 (5 点标准测点 + 教室级汇总 + 整改前后复测对比) ---- */
+.ins-grid{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+.ptchip{border:1px solid var(--edge);border-radius:8px;padding:8px 10px;font-size:13px;color:var(--dim);min-width:96px;line-height:1.5}
+.ptchip b{display:block;font-size:15px;color:inherit}
+.ptchip.done{border-color:#3fb950;color:#3fb950;background:rgba(63,185,80,.10)}
+.ptchip.fail{border-color:#f85149;color:#f85149;background:rgba(248,81,73,.10)}
+.ptchip.cur{border-color:#58a6ff;color:#58a6ff;background:rgba(88,166,255,.10)}
+.vbig{font-size:20px;font-weight:600;margin-bottom:6px}
+.adv{font-size:13px;padding:9px 11px;border-radius:8px;margin-top:6px;border:1px solid var(--edge);color:var(--dim)}
+/* .adv 与 .w-* 同为单类选择器且 .adv 在后, 需用 .adv.w-* 显式覆盖配色 */
+.adv.w-red{border-color:#f85149;color:#f85149;background:rgba(248,81,73,.10)}
+.adv.w-org{border-color:#f0883e;color:#f0883e;background:rgba(240,136,62,.10)}
+.adv.w-grn{border-color:#3fb950;color:#3fb950;background:rgba(63,185,80,.10)}
+body.big .ptchip{font-size:17px;min-width:132px}
+body.big .ptchip b{font-size:19px}
+body.big .vbig{font-size:32px}
+body.big .adv{font-size:17px;padding:12px 14px}
 </style>
 </head>
 <body>
@@ -140,6 +162,49 @@ body.big .trend-w{font-size:17px;padding:12px 14px}
 </section>
 <section id="pg-cls" style="display:none">
   <div class="card wide">
+    <div class="label">教室巡检 (5 点标准测点: 中心 C / 左前 LF / 右前 RF / 左后 LB / 右后 RB)</div>
+    <div class="cls-row">
+      <input id="insroom" maxlength="12" placeholder="教室号, 如 A302">
+      <select id="insscene">
+        <option value="白天上课">白天上课</option>
+        <option value="夜间自习">夜间自习</option>
+        <option value="阴天">阴天</option>
+        <option value="其他">其他</option>
+      </select>
+      <input id="insins" maxlength="8" placeholder="巡检人 (可空)">
+      <select id="insdur">
+        <option value="30">30 s</option>
+        <option value="60">1 min</option>
+        <option value="600">10 min</option>
+      </select>
+      <button id="insbtn" onclick="insCreate()">新建巡检</button>
+    </div>
+    <div class="ins-grid" id="insflow"></div>
+    <div class="btn2">
+      <button id="insmeas" onclick="insMeasure()" disabled style="border-color:#2ea043;color:#3fb950">测量待测点位</button>
+      <button id="insfin" onclick="insFinish()" disabled>完成巡检</button>
+      <button id="insabort" onclick="insAbort()" disabled>中止巡检</button>
+    </div>
+    <div class="meta" id="insstat" style="margin-top:8px">无进行中的巡检任务 (填教室号后点「新建巡检」)</div>
+  </div>
+  <div class="card wide" id="inssumcard" style="display:none">
+    <div class="label">教室级汇总 (5 点测完自动给出结论与整改建议)</div>
+    <div class="vbig" id="inssumv">--</div>
+    <div class="meta" id="inssums">--</div>
+    <table class="tbl" id="insptbl" style="margin-top:10px"></table>
+    <div id="insadv"></div>
+    <div class="btn2" style="margin-top:8px"><button onclick="insReport()">生成巡检报告 (一页摘要)</button></div>
+  </div>
+  <div class="card wide">
+    <div class="label">整改前后复测对比 (同一教室的两次巡检)</div>
+    <div class="cls-row">
+      <select id="inscA" onchange="insCompare()" style="flex:1"></select>
+      <select id="inscB" onchange="insCompare()" style="flex:1"></select>
+    </div>
+    <div class="meta" id="inscmp" style="margin-top:8px">--</div>
+    <div id="inscmpw"></div>
+  </div>
+  <div class="card wide">
     <div class="label">测量时长与灯具标签 (留空自动编号)</div>
     <div class="cls-row">
       <select id="clsdur">
@@ -153,22 +218,6 @@ body.big .trend-w{font-size:17px;padding:12px 14px}
     </div>
     <div class="pwrap"><div class="pbar" id="clspbar"></div></div>
     <div class="meta" id="clsstat">待机 · 时长可选 30 s / 1 min / 10 min</div>
-  </div>
-  <div class="card wide">
-    <div class="label">最近结果 (光照 + Pst^LM ≤ 1 + SVM ≤ 0.4)</div>
-    <div class="value" id="clsv">--</div>
-    <div class="cards" style="margin:10px 0 0">
-      <div><div class="label">波动深度 均值</div><div class="value" style="font-size:18px"><span id="clsm">--</span><small>%</small></div></div>
-      <div><div class="label">波动深度 峰值</div><div class="value" style="font-size:18px"><span id="clsmx">--</span><small>%</small></div></div>
-      <div><div class="label">主频</div><div class="value" style="font-size:18px"><span id="clsf">--</span><small>Hz</small></div></div>
-      <div><div class="label">Flicker Index</div><div class="value" style="font-size:18px" id="clsfi">--</div></div>
-      <div><div class="label">Pst^LM 均值</div><div class="value" style="font-size:18px" id="clsp">--</div></div>
-      <div><div class="label">Pst^LM 峰值</div><div class="value" style="font-size:18px" id="clspx">--</div></div>
-      <div><div class="label">SVM 均值</div><div class="value" style="font-size:18px" id="clssvm">--</div></div>
-      <div><div class="label">SVM 峰值</div><div class="value" style="font-size:18px" id="clssvmx">--</div></div>
-      <div><div class="label">光照均值</div><div class="value" style="font-size:18px" id="clsvavg">--</div></div>
-    </div>
-    <div class="meta" id="clslbl2" style="margin-top:8px">尚未测量</div>
   </div>
   <div class="card wide">
     <div class="label">灯具趋势分析 (同一标签 = 同一灯具 · 随时间变化与恶化预警)</div>
@@ -195,7 +244,7 @@ body.big .trend-w{font-size:17px;padding:12px 14px}
   </div>
   <div class="card wide">
     <div class="label">说明与局限</div>
-    <div class="meta">判定口径 (v1.1): 光照前置检查 (窗口均值 ADC 码 &lt;400 光线过暗 / &gt;3000 光线太亮, 此时 Pst/SVM 无效) → Pst^LM 取本次测量均值 ≤ 1 (IEC TR 61547-1), SVM 取本次测量均值 ≤ 0.4 (IEC TR 63158, EU 2024 生态设计限值); 波动深度与主频仅展示不判定。局限: ① 单测点只反映测点位置光照, 教室验收应多点测量 (中心+四角) 并用标签区分; ② 30s/1min 档 Pst^LM 为短时估计, 标准口径 10min (可选 10min 档); ③ 4.88Hz 频率分辨率, &lt;15Hz 主频精度有限; ④ 旧版本记录为旧口径判定或无 SVM/光照, 建议清空重测; ⑤ 同一灯具定期复查请填写完全相同的标签 (输入框提供历史标签下拉), 才会被趋势分析归为同一灯具; 趋势分析只用带日期的记录 —— 网页发起的测量自动带浏览器日期, 联网 (已配 OneNET WiFi) 时按键发起的测量也带日期。</div>
+    <div class="meta">判定口径 (v1.1): 光照前置检查 (窗口均值 ADC 码 &lt;400 光线过暗 / &gt;3000 光线太亮, 此时 Pst/SVM 无效) → Pst^LM 取本次测量均值 ≤ 1 (IEC TR 61547-1), SVM 取本次测量均值 ≤ 0.4 (IEC TR 63158, EU 2024 生态设计限值); 波动深度与主频仅展示不判定。局限: ① 单测点只反映测点位置光照, 教室验收应多点测量 (中心+四角) 并用标签区分; ② 30s/1min 档 Pst^LM 为短时估计, 标准口径 10min (可选 10min 档); ③ 4.88Hz 频率分辨率, &lt;15Hz 主频精度有限; ④ 旧版本记录为旧口径判定或无 SVM/光照, 建议清空重测; ⑤ 同一灯具定期复查请填写完全相同的标签 (输入框提供历史标签下拉), 才会被趋势分析归为同一灯具; 趋势分析只用带日期的记录 —— 网页发起的测量自动带浏览器日期, 联网 (已配 OneNET WiFi) 时按键发起的测量也带日期; ⑥ 记录上限 80 条 (约 16 次 5 点巡检), 记录满后无法开始新的测量, 请先「导出 CSV」再「清空记录」; 清空会同时清除全部巡检任务 (记录清空后任务归属无意义)。</div>
   </div>
 </section>
 <script>
@@ -247,23 +296,6 @@ const VCLS={0:'z-pass',1:'z-fail',2:'z-fail',3:'z-fail',4:'z-exempt',5:'z-fail',
 const durName=w=>w>=586?'10min':(w>=58?'1min':'30s');
 let clsList=[];
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
-function paintClsRes(r){
-  const v=$('clsv');
-  v.textContent=VNAME[r.v]||('--');
-  v.className='value '+(VCLS[r.v]||'');
-  $('clsm').textContent=r.m.toFixed(2);
-  $('clsmx').textContent=r.mmax.toFixed(2);
-  $('clsf').textContent=r.freq.toFixed(1);
-  $('clsfi').textContent=r.fi.toFixed(3);
-  $('clsp').textContent=r.pst.toFixed(3);
-  $('clspx').textContent=r.pstmax.toFixed(3);
-  $('clssvm').textContent=(r.s!=null)?r.s.toFixed(3):'--';
-  $('clssvmx').textContent=(r.sx!=null)?r.sx.toFixed(3):'--';
-  $('clsvavg').textContent=(r.va!=null)?r.va:'--';
-  const dt=r.tea?new Date(r.tea*1000):null;
-  $('clslbl2').textContent='标签: '+r.lb+' · 测量于 '+(dt?(ymd(dt)+' '+dt.toTimeString().slice(0,5)):'开机 T+'+r.ts+' s')+
-                            ' · 主频取频谱能量最大窗口';
-}
 function paintClsTable(){
   let h='<tr><th>#</th><th>日期</th><th>标签</th><th>时长</th><th>主频</th><th>m 均值</th><th>m 峰值</th><th>Pst 均值</th><th>SVM 均值</th><th>光照</th><th>判定</th></tr>';
   clsList.forEach((r,i)=>{
@@ -445,16 +477,353 @@ function drawTrend(){
   });
 }
 
+// ---------------- 教室巡检 (5 点标准测点; 设备端任务 + 前端教室级汇总) ----------------
+// 点位模板 (与设备 CLS_PT_* 一致): C 中心 / LF 左前 / RF 右前 / LB 左后 / RB 右后
+// 设备端 InspectionTask: 任务号/教室号/场景/巡检人/已完成点位掩码; 记录带 tid+pc 归属
+// 前端: 5 点聚合 → 教室级结论 (A 合规 / B 局部异常 / C 整体异常) + 最差点位 + 整改建议 + 两次巡检对比
+const PTS=[['C','中心',1],['LF','左前',2],['RF','右前',3],['LB','左后',4],['RB','右后',5]];
+const PTN={C:'中心',LF:'左前',RF:'右前',LB:'左后',RB:'右后'};
+const ptKey=n=>{const p=PTS.find(x=>x[2]===n);return p?p[0]:'';};
+const ptName=n=>{const p=PTS.find(x=>x[2]===n);return p?p[1]:'';};
+const sevOf=v=>v===0?0:(v===3?3:((v===6||v===7)?1:2));   // 严重度: 双项 > 单项 > 光照异常 > 合规
+let ins={active:false,id:0,mask:0,done:0,next:0,sum:null},insTasks=[],clsRun=false,insViewId=0;
+
+async function insApi(path,opt){
+  const r=await fetch(path,opt);
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(j.err||r.status);
+  return j;
+}
+function startErr(e){
+  const s=String(e);
+  if(/busy|full|task/i.test(s))
+    return '开始失败: 设备忙碌 / 记录已满 (上限 80 条) / 无进行中巡检任务。\n请先「导出 CSV」再「清空记录」后重试。';
+  return '开始失败: '+s;
+}
+// 某点位的记录 (按当前查看的巡检任务 insViewId 归组; 同一任务内多次复测取最后一条)
+// 用 insViewId 而非 ins.id: 任务结束后 ins.id 归零, 但汇总视图需保留上一次巡检
+function insRec(pc){let out=null;clsList.forEach(r=>{if(r.tid===insViewId&&r.pc===pc)out=r;});return out;}
+function insMask(){
+  if(ins.active)return ins.mask||0;
+  const t=insTasks.find(x=>x.id===insViewId);
+  return t?(t.mask||0):0;
+}
+
+function paintIns(){
+  const m=insMask();
+  $('insflow').innerHTML=PTS.map((p,i)=>{
+    const done=!!(m&(1<<i)),rec=done?insRec(p[2]):null,bad=done&&rec&&rec.v!==0;
+    const cur=ins.active&&!done&&ins.next===p[2];
+    const cls=done?(bad?' fail':' done'):(cur?' cur':'');
+    const st=done?(rec?String(VNAME[rec.v]||'--').replace(/ /g,''):'已测'):(cur?'待测':'未测');
+    return '<div class="ptchip'+cls+'">'+p[0]+' '+p[1]+'<b>'+st+'</b></div>';
+  }).join('');
+  const nx=ins.active?ins.next:0;
+  const tv=insTasks.find(x=>x.id===insViewId);       // 当前查看的任务 (任务结束后仍保留汇总视图)
+  $('insstat').textContent=ins.active
+    ?('巡检中: 教室 '+ins.room+' · 任务 #'+ins.id+' · 已完成 '+ins.done+'/5 · 待测 '+
+      (nx?(ptName(nx)+' ('+ptKey(nx)+')'):'无 (5 点已测完)'))
+    :(tv?('已完成: 教室 '+tv.room+' · 任务 #'+tv.id+' · '+(tv.done||0)+'/5 (下方为汇总; 重新填教室号可开始下次巡检)')
+       :'无进行中的巡检任务 (填教室号后点「新建巡检」)');
+  $('insmeas').textContent=ins.active?('测量待测点位: '+(nx?ptName(nx)+' '+ptKey(nx):'无')):'测量待测点位';
+  $('insbtn').disabled=ins.active||clsRun;
+  $('insmeas').disabled=!ins.active||!nx||clsRun;
+  $('insfin').disabled=!ins.active||clsRun;
+  $('insabort').disabled=!ins.active||clsRun;
+  $('insroom').disabled=$('insscene').disabled=$('insins').disabled=ins.active;
+  if(ins.active||tv)                          // 进行中填入任务信息; 已结束预填教室号便于下次巡检
+  {
+    $('insroom').value=(ins.active?ins.room:(tv?tv.room:''))||'';
+    if(ins.active){
+      if(ins.scene)$('insscene').value=ins.scene;
+      if(ins.ins)$('insins').value=ins.ins;
+    }
+  }
+}
+
+// 教室级汇总: 设备端 sum (M2 判定/建议位) + 前端点位表; 无 sum 时回落本地规则
+function clsSum(){
+  const got=PTS.map(p=>insRec(p[2])).filter(Boolean),card=$('inssumcard');
+  if(!got.length){card.style.display='none';return;}
+  card.style.display='';
+  const sm=(ins.sum&&ins.sum.id===insViewId)?ins.sum:null;
+  const fails=got.filter(r=>r.v!==0),nPts=sm?sm.pts:got.length,nFail=sm?sm.fail:fails.length;
+  let vt,vc,desc;
+  if(nPts<5){vt='待完成 '+nPts+'/5';vc='';desc='已完成 '+nPts+' 个点位, 5 点测完自动给出教室级结论';}
+  else if(sm&&sm.v===1){vt='A 合规';vc='z-pass';desc='5 个点位全部合规';}
+  else if(sm&&sm.v===2){vt='B 局部异常';vc='z-fail';desc=nFail+' 个点位异常 (局部问题), 建议先整改异常点位后复测';}
+  else if(sm&&sm.v===3){vt='C 整体异常';vc='z-fail';desc=nFail+' 个点位异常 (涉及面广), 疑似共性供电/驱动问题';}
+  else if(!fails.length){vt='A 合规';vc='z-pass';desc='5 个点位全部合规';}
+  else if(fails.length<=2){vt='B 局部异常';vc='z-fail';desc=fails.length+' 个点位异常 (局部问题), 建议先整改异常点位后复测';}
+  else {vt='C 整体异常';vc='z-fail';desc=fails.length+' 个点位异常 (涉及面广), 疑似共性供电/驱动问题';}
+  let worst=null;
+  if(sm&&sm.worst){const r=insRec(sm.worst);if(r)worst={s:1,r:r,k:ptKey(sm.worst)};}
+  if(!worst)PTS.forEach(p=>{const r=insRec(p[2]);if(!r)return;const s=sevOf(r.v);if(!worst||s>worst.s)worst={s:s,r:r,k:p[0]};});
+  const v=$('inssumv');v.textContent=vt;v.className='vbig '+(vc||'');
+  $('inssums').textContent=desc+(worst&&worst.s>0?(', 最差点位: '+PTN[worst.k]+' ('+worst.k+') '+(VNAME[worst.r.v]||'')):'');
+  let h='<tr><th>点位</th><th>光照</th><th>m 均值</th><th>Pst 均值</th><th>SVM 均值</th><th>判定</th></tr>';
+  PTS.forEach(p=>{
+    const r=insRec(p[2]);
+    h+='<tr><td>'+p[0]+' '+p[1]+'</td>'+(r
+      ?('<td>'+(r.va!=null?r.va:'--')+'</td><td>'+r.m.toFixed(2)+'%</td><td>'+r.p.toFixed(3)+
+        '</td><td>'+(r.s!=null?r.s.toFixed(3):'--')+'</td><td class="vchip '+(VCLS[r.v]||'')+'">'+(VNAME[r.v]||'--')+'</td>')
+      :'<td colspan="5" class="meta">未测</td>')+'</tr>';
+  });
+  $('insptbl').innerHTML=h;
+  $('insadv').innerHTML=insAdvice(got,fails,sm);
+}
+
+// 整改建议 (规则表, 设备端 CLS_ADV_* 位驱动; 无 sum 时按本地条件): 指标超标 / 光照量程 / 单点 vs 多点
+function insAdvice(got,fails,sm){
+  const am=sm?(sm.am||0):0,use=!!sm;
+  const on=(bit,local)=>use?!!(am&bit):local;
+  const dark=got.filter(r=>r.v===6),bright=got.filter(r=>r.v===7);
+  const cAbn=got.find(r=>r.pc===1&&r.v!==0);
+  const A=[];
+  if(on(0x0001,got.length>=5&&!fails.length))         // 仅当 5 点全部测完且均合规, 才给"保持现状"结论
+    A.push(['w-grn','各点位均合规 (Pst^LM ≤ 1, SVM ≤ 0.4, 光照量程正常)。建议保持现状并按巡检周期定期复测。']);
+  if(on(0x0002,fails.some(r=>r.p>1.0)))
+    A.push(['w-red','Pst^LM 超标 (低频闪): 多来自电感镇流器荧光灯或驱动电源低频调制。建议更换为高频/无频闪 LED 驱动, 并核实是否使用可控硅调光。']);
+  if(on(0x0004,fails.some(r=>r.s!=null&&r.s>0.4)))
+    A.push(['w-red','SVM 超标: 与驱动电源纹波和调光方式强相关。建议核实驱动器纹波抑制能力, 避免低成本 PWM 调光。']);
+  if(on(0x0008,dark.length))
+    A.push(['w-org','光照偏暗 ('+dark.map(r=>PTN[ptKey(r.pc)]||r.pc).join('/')+'): 核实灯具数量/功率是否不足或灯具老化遮挡, 必要时增加光源。']);
+  if(on(0x0010,bright.length))
+    A.push(['w-org','光照偏亮 ('+bright.map(r=>PTN[ptKey(r.pc)]||r.pc).join('/')+'): 传感器可能过曝或直射灯光, 建议降低测点高度/避开直射后复测。']);
+  if(on(0x0020,fails.some(r=>r.p<=1.0&&(r.s==null||r.s<=0.4)&&r.m>=30)))
+    A.push(['w-org','部分点位波动深度较大但 Pst/SVM 合规: 属高频调制, 可见度风险低, 建议核实同批驱动器一致性。']);
+  if(on(0x0040,fails.length>=3))
+    A.push(['w-red','多数点位同时异常: 优先排查同一供电回路/总驱动器与线路接触, 而非逐个更换灯具。']);
+  if(on(0x0080,cAbn&&fails.length<=2))
+    A.push(['w-org','中心点位异常而四角正常: 多为单灯具故障或该点位驱动异常, 建议先检查中心灯具。']);
+  if(on(0x0100,fails.length&&fails.length<=2&&!cAbn))
+    A.push(['w-org','局部点位异常 ('+fails.map(r=>PTN[ptKey(r.pc)]||r.pc).join('/')+'): 建议针对该点位对应灯具整改后复测。']);
+  if(on(0x0200,got.length<5))
+    A.push(['w-org','尚有 '+(5-got.length)+' 个点位未测, 教室级结论暂不完整。']);
+  return A.map(x=>'<div class="adv '+x[0]+'">'+esc(x[1])+'</div>').join('');
+}
+
+// 复测对比: 同一教室两次巡检逐点对比 (Pst/SVM/光照), 变化超过噪声阈值才判定恶化/改善
+const TRD={p:0.03,s:0.015,va:25};
+function insCmpRecs(id){const o={};clsList.forEach(r=>{if(r.tid===id&&r.pc)o[r.pc]=r;});return o;}
+function insCmpFill(){
+  const opts=insTasks.map(t=>'<option value="'+t.id+'">'+esc(t.room)+' #'+t.id+
+    (t.epoch?(' '+ymd(new Date(t.epoch*1000))):'')+' ('+t.done+'/5)</option>').join('');
+  ['inscA','inscB'].forEach(id=>{
+    const el=$(id),cur=el.value;
+    el.innerHTML='<option value="">— 选择 —</option>'+opts;
+    if(cur&&[...el.options].some(o=>o.value===cur))el.value=cur;
+  });
+  if(!$('inscA').value&&!$('inscB').value&&insTasks.length){
+    const last=insTasks[insTasks.length-1];
+    $('inscB').value=last.id;
+    for(let i=insTasks.length-2;i>=0;i--)
+      if(insTasks[i].room===last.room){$('inscA').value=insTasks[i].id;break;}
+    if(!$('inscA').value&&insTasks.length>=2)$('inscA').value=insTasks[insTasks.length-2].id;
+  }
+  insCompare();
+}
+function insCompare(){
+  const A=+$('inscA').value,B=+$('inscB').value;
+  const ta=insTasks.find(t=>t.id===A),tb=insTasks.find(t=>t.id===B),box=$('inscmpw');
+  if(!ta||!tb){$('inscmp').textContent='选择两次巡检任务 (同一教室) 进行整改前后对比';box.innerHTML='';return;}
+  if(ta.room!==tb.room){$('inscmp').textContent='两次任务教室不同 ('+ta.room+' vs '+tb.room+'), 无法对比';box.innerHTML='';return;}
+  const ra=insCmpRecs(A),rb=insCmpRecs(B),keys=Object.keys(rb);
+  if(!keys.length){$('inscmp').textContent='后一次巡检 ('+tb.room+' #'+tb.id+') 尚无记录';box.innerHTML='';return;}
+  let rows='<tr><th>点位</th><th>Pst (前→后)</th><th>SVM (前→后)</th><th>光照 (前→后)</th><th>结论</th></tr>';
+  keys.sort().forEach(k=>{
+    const a=ra[k],b=rb[k],pn=PTN[ptKey(+k)]||k;
+    if(!a){rows+='<tr><td>'+pn+'</td><td colspan="3" class="meta">前一次无记录</td><td class="vchip '+(VCLS[b.v]||'')+'">'+(VNAME[b.v]||'--')+'</td></tr>';return;}
+    const dp=b.p-a.p,ds=(b.s||0)-(a.s||0),dva=(b.va!=null?b.va:0)-(a.va!=null?a.va:0);
+    let st,sc='';
+    if(a.v!==0&&b.v===0){st='整改有效 (异常 → 合规)';sc='w-grn';}
+    else if(a.v===0&&b.v!==0){st='出现新异常';sc='w-red';}
+    else if(dp>TRD.p||ds>TRD.s){st='指标恶化';sc='w-red';}
+    else if(dp<-TRD.p||ds<-TRD.s){st='指标改善';sc='w-grn';}
+    else if(dva<-TRD.va){st='光照下降 (疑似光衰/积灰)';sc='w-org';}
+    else st='基本持平';
+    rows+='<tr><td>'+pn+'</td><td>'+a.p.toFixed(3)+' → '+b.p.toFixed(3)+
+      '</td><td>'+(a.s!=null?a.s.toFixed(3):'--')+' → '+(b.s!=null?b.s.toFixed(3):'--')+
+      '</td><td>'+(a.va!=null?a.va:'--')+' → '+(b.va!=null?b.va:'--')+
+      '</td><td class="vchip '+(sc||'')+'">'+st+'</td></tr>';
+  });
+  $('inscmp').textContent='对比: '+ta.room+' #'+ta.id+(ta.epoch?(' ('+ymd(new Date(ta.epoch*1000))+')'):'')+
+                          ' → #'+tb.id+(tb.epoch?(' ('+ymd(new Date(tb.epoch*1000))+')'):'');
+  box.innerHTML='<table class="tbl" style="margin-top:10px">'+rows+'</table>';
+}
+
+// ---------------- M3: 一页式巡检摘要报告 (设计文档 13 章; 纯前端生成, 浏览器打印/存 PDF) ----------------
+// 结构: 基本信息 → 教室级结论 → 点位结果表 → 整改建议 → 复测对比(如有) → 附注
+function insSumLocal(got){                       // 设备端 sum 缺失时的本地汇总 (与 classroomSummarize 同规则)
+  const fails=got.filter(r=>r.v!==0),cAbn=got.some(r=>r.pc===1&&r.v!==0);
+  const v=got.length<5?0:(!fails.length?1:(fails.length<=2&&!cAbn?2:3));
+  let worst=0,ws=0;
+  got.forEach(r=>{if(r.v!==0){const s=sevOf(r.v);if(s>ws){ws=s;worst=r.pc;}}});
+  return {id:insViewId,pts:got.length,fail:fails.length,v:v,worst:worst,
+          pf:got.filter(r=>r.p>1.0).length,sf:got.filter(r=>r.s!=null&&r.s>0.4).length,
+          dark:got.filter(r=>r.v===6).length,bright:got.filter(r=>r.v===7).length};
+}
+function insRiskTxt(sm){
+  const a=[];
+  if(sm.pf)a.push('低频频闪 (Pst^LM)');
+  if(sm.sf)a.push('高频可见度 (SVM)');
+  if(sm.dark)a.push('光照不足');
+  if(sm.bright)a.push('光照过亮');
+  return a.length?a.join(' + '):'未发现';
+}
+function insPrevTask(t){                         // 同一教室上一次巡检 (用于报告复测对比)
+  let prev=null;
+  insTasks.forEach(x=>{if(x.id<t.id&&x.room===t.room&&(!prev||x.id>prev.id))prev=x;});
+  return prev;
+}
+function insReport(){
+  const t=insTasks.find(x=>x.id===insViewId);
+  if(!t){alert('没有可导出的巡检任务');return;}
+  const got=PTS.map(p=>insRec(p[2])).filter(Boolean);
+  if(!got.length){alert('该任务还没有测量记录, 无法生成报告');return;}
+  const sm=(ins.sum&&ins.sum.id===insViewId)?ins.sum:insSumLocal(got);
+  const fails=got.filter(r=>r.v!==0);
+  const date=t.epoch?ymd(new Date(t.epoch*1000)):(got[0].tea?ymd(new Date(got[0].tea*1000)):'日期未知');
+  const dur=durName(got[0].w||29);
+  const vc=sm.v===1?'pass':(sm.v===2||sm.v===3)?'fail':'na';
+  const vt=sm.v===1?'A 教室合规':sm.v===2?'B 教室局部风险':sm.v===3?'C 教室整体风险':'结论待定 (点位未测全)';
+  const worst=sm.worst?ptKey(sm.worst)+' '+ptName(sm.worst):'--';
+  const worstV=sm.worst?insRec(sm.worst):null;
+  // 复测对比 (同一教室上一次巡检, 判定规则与页面 insCompare 一致)
+  const prev=insPrevTask(t),ra=prev?insCmpRecs(prev.id):null;
+  let cmp='',st={fix:0,good:0,bad:0,nw:0,light:0,flat:0};
+  if(prev){
+    cmp='<h2>三、复测对比 (与 '+esc(prev.room)+' #'+prev.id+(prev.epoch?' '+ymd(new Date(prev.epoch*1000)):'')+' 巡检)</h2>'+
+        '<table><tr><th>点位</th><th>Pst^LM (前→后)</th><th>SVM (前→后)</th><th>光照 (前→后)</th><th>结论</th></tr>';
+    Object.keys(insCmpRecs(t.id)).sort().forEach(k=>{
+      const a=ra[+k],b=insRec(+k),pn=ptKey(+k)+' '+ptName(+k);
+      if(!a){cmp+='<tr><td>'+pn+'</td><td colspan="3">前次未测</td><td class="c '+(VCLS[b.v]||'')+'">'+(VNAME[b.v]||'--')+'</td></tr>';return;}
+      const dp=b.p-a.p,ds=(b.s||0)-(a.s||0),dva=(b.va!=null?b.va:0)-(a.va!=null?a.va:0);
+      let txt,cls='';
+      if(a.v!==0&&b.v===0){txt='整改有效 (异常→合规)';cls='grn';st.fix++;}
+      else if(a.v===0&&b.v!==0){txt='出现新异常';cls='red';st.nw++;}
+      else if(dp>TRD.p||ds>TRD.s){txt='指标恶化';cls='red';st.bad++;}
+      else if(dp<-TRD.p||ds<-TRD.s){txt='指标改善';cls='grn';st.good++;}
+      else if(dva<-TRD.va){txt='光照下降 (疑似光衰/积灰)';cls='org';st.light++;}
+      else{txt='基本持平';st.flat++;}
+      cmp+='<tr><td>'+pn+'</td><td>'+a.p.toFixed(3)+' → '+b.p.toFixed(3)+
+        '</td><td>'+(a.s!=null?a.s.toFixed(3):'--')+' → '+(b.s!=null?b.s.toFixed(3):'--')+
+        '</td><td>'+(a.va!=null?a.va:'--')+' → '+(b.va!=null?b.va:'--')+
+        '</td><td class="c '+cls+'">'+txt+'</td></tr>';
+    });
+    cmp+='</table>';
+    const s2=[];
+    if(st.fix)s2.push('整改有效 '+st.fix+' 点');
+    if(st.good)s2.push('改善 '+st.good+' 点');
+    if(st.nw||st.bad)s2.push('恶化/新异常 '+(st.nw+st.bad)+' 点');
+    if(st.light)s2.push('光照下降 '+st.light+' 点');
+    if(st.flat)s2.push('持平 '+st.flat+' 点');
+    if(s2.length)cmp+='<div class="note">对比摘要: '+s2.join(' · ')+'。</div>';
+  }
+  // 点位结果表 (13.2: 点位 | Pst^LM | SVM | 波动深度 | 光照 | 判定)
+  let rows='';
+  PTS.forEach(p=>{
+    const r=insRec(p[2]);
+    rows+=r
+      ?('<tr><td>'+p[0]+' '+p[1]+'</td><td>'+r.p.toFixed(3)+'</td><td>'+(r.s!=null?r.s.toFixed(3):'--')+
+        '</td><td>'+r.m.toFixed(2)+'%</td><td>'+(r.va!=null?r.va:'--')+
+        '</td><td class="c '+(VCLS[r.v]||'')+'">'+(VNAME[r.v]||'--')+'</td></tr>')
+      :('<tr class="dim"><td>'+p[0]+' '+p[1]+'</td><td colspan="5">未测</td></tr>');
+  });
+  const adv=insAdvice(got,fails,sm);
+  const h='<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>教室巡检摘要 '+esc(t.room)+' '+date+'</title><style>'+
+    'body{font-family:"Microsoft YaHei",system-ui,sans-serif;background:#e8eaed;color:#1a1a1a;margin:0;padding:18px;font-size:13px}'+
+    '.pg{max-width:820px;margin:0 auto;background:#fff;padding:26px 32px;border-radius:6px;box-shadow:0 1px 6px rgba(0,0,0,.15)}'+
+    'h1{font-size:20px;margin:0 0 2px}h2{font-size:14px;margin:16px 0 6px;border-bottom:1px solid #ddd;padding-bottom:3px}'+
+    '.sub{color:#777;font-size:11px;margin-bottom:12px}'+
+    'table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:4px 7px;text-align:center;font-size:12px}'+
+    'th{background:#f2f3f5}td.c{font-weight:600}td.grn{color:#137333}td.red{color:#c5221f}td.org{color:#b06000}tr.dim td{color:#999}'+
+    '.info td{text-align:left;border:none;padding:2px 4px;font-size:12.5px}'+
+    '.verdict{margin:14px 0 4px;padding:10px 14px;border-radius:5px;font-size:17px;font-weight:700}'+
+    '.verdict.pass{background:#e6f6ea;color:#137333;border:1px solid #9adba9}'+
+    '.verdict.fail{background:#fde8e8;color:#c5221f;border:1px solid #f2a6a6}'+
+    '.verdict.na{background:#f1f3f4;color:#555;border:1px solid #ccc}'+
+    '.kv{color:#444;font-size:12px;margin:2px 0 6px}'+
+    '.adv{border:1px solid #e0e0e0;border-left:4px solid #888;border-radius:4px;padding:6px 10px;margin:5px 0;background:#fafafa}'+
+    '.adv.w-red{border-left-color:#d93025;background:#fdf0ef}.adv.w-org{border-left-color:#e8710a;background:#fdf5ee}.adv.w-grn{border-left-color:#188038;background:#eef7f0}'+
+    '.note{color:#555;font-size:11px;margin:8px 0;line-height:1.6}.ft{margin-top:14px;color:#999;font-size:10.5px;border-top:1px solid #eee;padding-top:6px}'+
+    '.nop{position:fixed;right:20px;top:16px;padding:8px 16px;background:#1a73e8;color:#fff;border:none;border-radius:5px;font-size:13px;cursor:pointer}'+
+    '@page{size:A4;margin:12mm}@media print{.nop{display:none}body{background:#fff;padding:0}.pg{box-shadow:none;max-width:none;padding:0}}'+
+    '</style></head><body><button class="nop" onclick="window.print()">打印 / 存为 PDF</button><div class="pg">'+
+    '<h1>教室照明频闪巡检摘要</h1><div class="sub">LightSense 教室照明频闪检测仪 · 判定依据: Pst^LM ≤ 1 (IEC TR 61547-1) · SVM ≤ 0.4 (IEC TR 63158)</div>'+
+    '<table class="info"><tr><td><b>教室:</b> '+esc(t.room)+'</td><td><b>巡检日期:</b> '+date+'</td><td><b>巡检人:</b> '+esc(t.ins||'--')+'</td></tr>'+
+    '<tr><td><b>巡检类型:</b> '+esc(t.scene||'--')+'</td><td><b>任务号:</b> #'+t.id+'</td><td><b>单点测量时长:</b> '+dur+' × 5 点</td></tr></table>'+
+    '<div class="verdict '+vc+'">'+vt+'</div>'+
+    '<div class="kv">异常点位: '+sm.fail+'/'+sm.pts+' · 最差点位: '+worst+(worstV?(' ('+(VNAME[worstV.v]||'--')+')'):'')+' · 风险类型: '+insRiskTxt(sm)+'</div>'+
+    '<h2>一、点位结果</h2><table><tr><th>点位</th><th>Pst^LM (≤1.0)</th><th>SVM (≤0.4)</th><th>波动深度 m</th><th>光照 (ADC)</th><th>判定</th></tr>'+rows+'</table>'+
+    '<h2>二、整改建议</h2>'+(adv||'<div class="note">无</div>')+
+    cmp+
+    '<div class="note">附注: ① 判定口径: 光照量程正常 (ADC 400~3000) 且 Pst^LM ≤ 1 且 SVM ≤ 0.4 判合规; ② 教室级结论由设备端 5 点汇总自动生成 (A = 全部合规, B = 1~2 点异常且中心正常, C = ≥3 点异常或中心异常); ③ 本摘要为现场快速普查结果, 正式验收应依据 GB/T 5700 等标准测量方法。</div>'+
+    '<div class="ft">生成时间: '+new Date().toLocaleString('zh-CN')+' · LightSense v1.6 教室巡检 · 任务 #'+t.id+'</div>'+
+    '</div></body></html>';
+  const w=window.open('','_blank');
+  if(w){w.document.open();w.document.write(h);w.document.close();}
+  else{                                               // 弹窗被拦截 → 下载 HTML 文件
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([h],{type:'text/html;charset=utf-8'}));
+    a.download='巡检摘要_'+t.room+'_'+date+'.html';
+    a.click();URL.revokeObjectURL(a.href);
+  }
+}
+
+async function insCreate(){
+  const room=$('insroom').value.trim();
+  if(!room){alert('请先填写教室号, 例如 A302');return;}
+  try{
+    await insApi('/api/inspect/start?room='+encodeURIComponent(room)+
+                 '&scene='+encodeURIComponent($('insscene').value)+
+                 '&ins='+encodeURIComponent($('insins').value.trim())+
+                 '&t='+Math.floor(Date.now()/1000),{method:'POST'});
+    await insRefresh();
+  }catch(e){alert('新建巡检失败: '+e);}
+}
+async function insMeasure(){
+  if(!ins.active||!ins.next){alert('当前没有待测点位');return;}
+  const dur=$('insdur').value,wn={30:29,60:58,600:586}[dur]||29;
+  $('insmeas').disabled=true;
+  try{
+    await insApi('/api/classroom/start?pt='+ins.next+'&dur='+dur+'&t='+Math.floor(Date.now()/1000),{method:'POST'});
+    $('clsstat').textContent='测量中 (巡检点位 '+ptKey(ins.next)+' '+ptName(ins.next)+') 0 / '+wn+' 窗口...';
+  }catch(e){alert(startErr(e));await insRefresh();}
+}
+async function insFinish(){
+  if(!ins.active)return;
+  if(!confirm('结束当前巡检 (教室 '+ins.room+')?\n未测的点位不会计入教室级汇总。'))return;
+  try{await insApi('/api/inspect/finish',{method:'POST'});await insRefresh();}catch(e){alert('结束失败: '+e);}
+}
+async function insAbort(){
+  if(!ins.active)return;
+  if(!confirm('中止当前巡检 (教室 '+ins.room+')?\n已测点位的记录保留, 任务标记为已中止。'))return;
+  try{await insApi('/api/inspect/abort',{method:'POST'});await insRefresh();}catch(e){alert('中止失败: '+e);}
+}
+async function insRefresh(){
+  try{
+    ins=await insApi('/api/inspect');
+    insTasks=ins.tasks||[];
+  }catch(e){ins={active:false,id:0,mask:0,done:0,next:0};insTasks=[];}
+  // 汇总视图任务号: 进行中 → 当前任务; 已结束 → 最近一次任务 (页面刷新后仍能看到上次巡检汇总)
+  if(ins.active)insViewId=ins.id;
+  else if(!insTasks.some(t=>t.id===insViewId))
+    insViewId=insTasks.length?insTasks[insTasks.length-1].id:0;
+  paintIns();clsSum();insCmpFill();
+}
+
 async function clsRefresh(){
   try{
     const r=await fetch('/api/classroom');
     const j=await r.json();
     clsList=j.records||[];
     paintClsTable();
-    if(j.latest)paintClsRes(j.latest);
     $('clsbtn').disabled=!!j.run;
+    clsRun=!!j.run;                           // 测量状态供巡检按钮禁用 (测点测量会占用设备)
     if(!j.run)$('clspbar').style.width=(j.nwin>=(j.tot||29)?'100%':'0%');
     trRefresh();
+    await insRefresh();                       // 必须 await: 汇总/建议依赖 clsList + ins.id, 否则本帧可能用旧数据
   }catch(e){}
 }
 async function clsStart(){
@@ -467,13 +836,11 @@ async function clsStart(){
     $('clsbtn').disabled=true;
     const wn={30:29,60:58,600:586}[dur]||29,dl=dur>=60?(dur/60)+' min':dur+' s';
     $('clsstat').textContent='测量中 0 / '+wn+' 窗口 (~'+dl+')...';
-  }catch(e){alert('开始失败: '+e);}
+  }catch(e){alert(startErr(e));}
 }
 async function clsClear(){
   if(!confirm('确定清空全部测量记录?'))return;
-  try{await fetch('/api/classroom/clear',{method:'POST'});await clsRefresh();
-      $('clsv').textContent='--';$('clsv').className='value';
-      $('clslbl2').textContent='尚未测量';}catch(e){alert('清空失败: '+e);}
+  try{await fetch('/api/classroom/clear',{method:'POST'});await clsRefresh();}catch(e){alert('清空失败: '+e);}
 }
 function clsCsv(){
   const rows=[['#','标签','日期','时长','T+秒','主频Hz','m均值%','m峰值%','FlickerIndex','Pst均值','Pst峰值','SVM均值','SVM峰值','光照ADC','判定']];
@@ -486,6 +853,7 @@ function clsCsv(){
   URL.revokeObjectURL(a.href);
 }
 function clsUpdate(c){
+  clsRun=!!c.run;                            // 实时测量状态 → 巡检按钮禁用同步
   const pct=c.res?100:Math.round(100*c.win/(c.tot||29));
   $('clspbar').style.width=pct+'%';
   if(c.run){
@@ -494,8 +862,7 @@ function clsUpdate(c){
   }else{
     $('clsbtn').disabled=false;
     if(c.res){
-      paintClsRes(c.res);
-      clsRefresh();
+      clsRefresh();                           // 刷新记录 + 巡检汇总 (不再有独立"最近结果"卡片)
       $('clsstat').textContent='测量完成 ('+durName(c.res.w||29)+'): '+(VNAME[c.res.v]||'');
     }else if($('clsstat').textContent.startsWith('测量中')){
       $('clsstat').textContent='待机 · 时长可选 30 s / 1 min / 10 min';
@@ -556,6 +923,13 @@ function render(d){
   $('meta').textContent='窗口 #'+d.seq+' · '+d.samples+' 样本 · DMA 溢出 '+d.ovf+
     (d.ovf>0?' (数据丢失!)':'')+' · 更新于 '+new Date().toLocaleTimeString();
   if(d.cls)clsUpdate(d.cls);
+  // 巡检状态实时同步 (设备端任务掩码/待测点位随测量完成变化; 无任务时不下发, 由 /api/inspect 兜底)
+  if(d.ins){
+    ins.active=true;ins.id=d.ins.id;ins.room=d.ins.room;ins.mask=d.ins.mask;ins.done=d.ins.done;ins.next=d.ins.next;
+    if(d.sm)ins.sum=d.sm;                     // 设备端教室级汇总 (M2): 点位完成即出结论
+    insViewId=d.ins.id;
+    paintIns();clsSum();                      // 同步点位芯片 + 汇总 (记录在随后 clsRefresh 帧补齐)
+  }
 }
 
 // 大屏模式绘图缩放系数 (canvas 内字号与边距随 body.big 放大)
@@ -681,6 +1055,18 @@ static void utf8Trunc(String &s, size_t maxBytes)
     s = s.substring(0, cut);
 }
 
+// 教室级汇总 JSON (M2: 设备端判定 v + 建议位掩码 am; /api/inspect 与 WS ins 帧共用)
+static int jsonSummary(char *dst, size_t cap, const ClassroomSummary &sm)
+{
+    return snprintf(dst, cap,
+                    "{\"id\":%u,\"pts\":%u,\"pass\":%u,\"fail\":%u,\"dark\":%u,\"bright\":%u,"
+                    "\"pf\":%u,\"sf\":%u,\"worst\":%u,\"v\":%u,\"am\":%u}",
+                    (unsigned)sm.taskId, (unsigned)sm.points, (unsigned)sm.passCnt,
+                    (unsigned)sm.failCnt, (unsigned)sm.darkCnt, (unsigned)sm.brightCnt,
+                    (unsigned)sm.pstFailCnt, (unsigned)sm.svmFailCnt,
+                    (unsigned)sm.worstCode, (unsigned)sm.verdict, (unsigned)sm.advice);
+}
+
 // ---------------- 云端配网页 (/setup, 独立小页, 密钥只存设备 NVS) ----------------
 static const char SETUP_HTML[] PROGMEM = R"rawliteral(
 <!doctype html><html lang=zh><head><meta charset=utf-8>
@@ -801,15 +1187,24 @@ bool webdashBegin(void)
     // 教室测量: 状态 + 记录列表
     server.on("/api/classroom", HTTP_GET, [](AsyncWebServerRequest *req)
     {
-        static char cb[12 * 1024];      // 仅 async_tcp 任务调用, 单线程安全 (50 条记录 + epoch 字段留余量)
         uint16_t nR = 0;
         const ClassroomRecord *rs = classroomRecords(&nR);
-        int n = snprintf(cb, sizeof(cb),
+        // 响应缓冲按需堆分配 (v1.6.1): 原先 24KB 常驻 BSS 持续挤压堆, 使 WebSocket 广播 new[] 在堆
+        // 紧张时抛 std::bad_alloc → std::terminate → abort → 重启 (实测崩溃点); 改按需 malloc + 用后
+        // free, 常驻占用归零 (记录 ≤80 条 × ≤288B + 尾部 640B 余量)
+        size_t cap = 640 + (size_t)nR * 288;
+        char *cb = (char *)malloc(cap);
+        if (!cb)
+        {
+            req->send(503, "application/json", "{\"err\":\"low mem\"}");
+            return;
+        }
+        int n = snprintf(cb, cap,
                          "{\"run\":%u,\"nwin\":%lu,\"tot\":%u,\"n\":%u,\"records\":[",
                          (unsigned)classroomIsRunning(),
                          (unsigned long)classroomWindowsDone(),
                          (unsigned)classroomWindowsTarget(), (unsigned)nR);
-        for (uint16_t i = 0; i < nR && n < (int)sizeof(cb) - 192; i++)
+        for (uint16_t i = 0; i < nR && n < (int)cap - 640; i++)
         {
             char lb[80];
             jsonEscape(lb, sizeof(lb), rs[i].label);
@@ -823,7 +1218,10 @@ bool webdashBegin(void)
             if (rs[i].epoch)             // 无真实日期 (旧记录/未校时) → 不输出 tea, 前端排除在趋势外
                 snprintf(sv + strlen(sv), sizeof(sv) - strlen(sv), ",\"tea\":%lu",
                          (unsigned long)rs[i].epoch);
-            n += snprintf(cb + n, sizeof(cb) - n,
+            if (rs[i].taskId)            // 巡检测量 → 输出归属任务号 + 点位码 (前端按任务聚合成教室结论)
+                snprintf(sv + strlen(sv), sizeof(sv) - strlen(sv), ",\"tid\":%u,\"pc\":%u",
+                         (unsigned)rs[i].taskId, (unsigned)rs[i].pointCode);
+            n += snprintf(cb + n, cap - n,
                           "%s{\"i\":%u,\"lb\":\"%s\",\"ts\":%lu,\"w\":%u,\"m\":%.2f,\"mx\":%.2f,"
                           "\"fi\":%.3f,\"p\":%.3f,\"px\":%.3f,\"f\":%.2f,\"v\":%u%s}",
                           (i ? "," : ""), (unsigned)i, lb,
@@ -832,7 +1230,7 @@ bool webdashBegin(void)
                           rs[i].fi, rs[i].pstMean, rs[i].pstMax, rs[i].freq,
                           (unsigned)rs[i].verdict, sv);
         }
-        n += snprintf(cb + n, sizeof(cb) - n, "],\"latest\":");
+        n += snprintf(cb + n, cap - n, "],\"latest\":");
         if (nR > 0)
         {
             const ClassroomRecord *L = &rs[nR - 1];
@@ -848,7 +1246,10 @@ bool webdashBegin(void)
             if (L->epoch)
                 snprintf(sv + strlen(sv), sizeof(sv) - strlen(sv), ",\"tea\":%lu",
                          (unsigned long)L->epoch);
-            n += snprintf(cb + n, sizeof(cb) - n,
+            if (L->taskId)
+                snprintf(sv + strlen(sv), sizeof(sv) - strlen(sv), ",\"tid\":%u,\"pc\":%u",
+                         (unsigned)L->taskId, (unsigned)L->pointCode);
+            n += snprintf(cb + n, cap - n,
                           "{\"lb\":\"%s\",\"m\":%.2f,\"mmax\":%.2f,\"fi\":%.3f,"
                           "\"pst\":%.3f,\"pstmax\":%.3f,\"freq\":%.2f,\"v\":%u,\"ts\":%lu,\"w\":%u%s}",
                           lb, L->mMean, L->mMax, L->fi, L->pstMean, L->pstMax,
@@ -857,10 +1258,11 @@ bool webdashBegin(void)
         }
         else
         {
-            n += snprintf(cb + n, sizeof(cb) - n, "null");
+            n += snprintf(cb + n, cap - n, "null");
         }
-        snprintf(cb + n, sizeof(cb) - n, "}");
-        req->send(200, "application/json", cb);
+        snprintf(cb + n, cap - n, "}");
+        req->send(200, "application/json", cb);   // send() 同步拷贝内容到响应对象, 拷贝后即可释放
+        free(cb);
     });
 
     // 教室测量: 开始一次测量 (?label=灯具标签, ?dur=30|60|600 秒, ?t=Unix秒, 均可省略, 默认 30s 档)
@@ -884,9 +1286,119 @@ bool webdashBegin(void)
             long tv = req->getParam("t")->value().toInt();
             if (tv > 1600000000L) epoch = (uint32_t)tv;
         }
-        if (!classroomStart(label.c_str(), wins, epoch))
+        // pt = 巡检测点 (1..5): 标签由设备按当前巡检任务生成 <教室号>-<点位码>, 完成时自动推进
+        bool ok;
+        if (req->hasParam("pt"))
         {
-            req->send(409, "application/json", "{\"err\":\"busy or records full\"}");
+            long pc = req->getParam("pt")->value().toInt();
+            ok = (pc >= CLS_PT_C && pc <= CLS_PT_RB)
+                 && classroomInspectStartPoint((uint8_t)pc, wins, epoch);
+        }
+        else
+        {
+            ok = classroomStart(label.c_str(), wins, epoch);
+        }
+        if (!ok)
+        {
+            req->send(409, "application/json", "{\"err\":\"busy, records full or no active task\"}");
+            return;
+        }
+        req->send(200, "application/json", "{\"ok\":1}");
+    });
+
+    // 教室巡检: 当前任务 + 任务列表 + 教室级汇总 (记录经 /api/classroom 的 tid/pc 归属到任务)
+    server.on("/api/inspect", HTTP_GET, [](AsyncWebServerRequest *req)
+    {
+        static char ib[4 * 1024];      // 仅 async_tcp 任务调用, 单线程安全
+        const InspectionTask *t = classroomInspectTask();
+        uint16_t nt = 0;
+        const InspectionTask *ts = classroomTasks(&nt);
+        int n = snprintf(ib, sizeof(ib), "{\"active\":%u",
+                         (unsigned)classroomInspectActive());
+        if (t)
+        {
+            char rb[80], sb[56], nb[56];
+            jsonEscape(rb, sizeof(rb), t->room);
+            jsonEscape(sb, sizeof(sb), t->scene);
+            jsonEscape(nb, sizeof(nb), t->inspector);
+            n += snprintf(ib + n, sizeof(ib) - n,
+                          ",\"id\":%u,\"room\":\"%s\",\"scene\":\"%s\",\"ins\":\"%s\","
+                          "\"epoch\":%lu,\"status\":%u,\"mask\":%u,\"done\":%u,\"next\":%u",
+                          (unsigned)t->id, rb, sb, nb, (unsigned long)t->epoch,
+                          (unsigned)t->status, (unsigned)t->mask,
+                          (unsigned)t->pointsCount, (unsigned)classroomInspectNextPoint());
+        }
+        // 教室级汇总 (M2): 进行中任务优先, 否则最近一次任务; 设备端判定 + 建议位掩码
+        uint16_t smId = t ? t->id : (nt ? ts[nt - 1].id : 0);
+        ClassroomSummary sm;
+        char sumBuf[192] = "null";
+        if (smId)
+        {
+            classroomSummarize(smId, &sm);
+            jsonSummary(sumBuf, sizeof(sumBuf), sm);
+        }
+        n += snprintf(ib + n, sizeof(ib) - n, ",\"sum\":%s,\"tasks\":[", sumBuf);
+        for (uint16_t i = 0; i < nt && n < (int)sizeof(ib) - 160; i++)
+        {
+            char rb[80], sb[56], nb[56];
+            jsonEscape(rb, sizeof(rb), ts[i].room);
+            jsonEscape(sb, sizeof(sb), ts[i].scene);
+            jsonEscape(nb, sizeof(nb), ts[i].inspector);
+            n += snprintf(ib + n, sizeof(ib) - n,
+                          "%s{\"id\":%u,\"room\":\"%s\",\"scene\":\"%s\",\"ins\":\"%s\",\"status\":%u,"
+                          "\"mask\":%u,\"done\":%u,\"epoch\":%lu}",
+                          (i ? "," : ""), (unsigned)ts[i].id, rb, sb, nb,
+                          (unsigned)ts[i].status, (unsigned)ts[i].mask,
+                          (unsigned)ts[i].pointsCount, (unsigned long)ts[i].epoch);
+        }
+        n += snprintf(ib + n, sizeof(ib) - n, "]}");
+        req->send(200, "application/json", ib);
+    });
+
+    // 教室巡检: 新建任务 (?room=教室号&scene=场景&ins=巡检人&t=Unix秒)
+    server.on("/api/inspect/start", HTTP_POST, [](AsyncWebServerRequest *req)
+    {
+        String room, scene, ins;
+        if (req->hasParam("room"))  room  = req->getParam("room")->value();
+        if (req->hasParam("scene")) scene = req->getParam("scene")->value();
+        if (req->hasParam("ins"))   ins   = req->getParam("ins")->value();
+        utf8Trunc(room, 23);
+        utf8Trunc(scene, 15);
+        utf8Trunc(ins, 15);
+        if (!room.length())
+        {
+            req->send(400, "application/json", "{\"err\":\"room required\"}");
+            return;
+        }
+        uint32_t epoch = 0;
+        if (req->hasParam("t"))
+        {
+            long tv = req->getParam("t")->value().toInt();
+            if (tv > 1600000000L) epoch = (uint32_t)tv;
+        }
+        if (!classroomInspectCreate(room.c_str(), scene.c_str(), ins.c_str(), epoch))
+        {
+            req->send(409, "application/json", "{\"err\":\"busy or task full\"}");
+            return;
+        }
+        req->send(200, "application/json", "{\"ok\":1}");
+    });
+
+    // 教室巡检: 中止 / 结束当前任务
+    server.on("/api/inspect/abort", HTTP_POST, [](AsyncWebServerRequest *req)
+    {
+        if (!classroomInspectAbort())
+        {
+            req->send(409, "application/json", "{\"err\":\"no active task or measuring\"}");
+            return;
+        }
+        req->send(200, "application/json", "{\"ok\":1}");
+    });
+    server.on("/api/inspect/finish", HTTP_POST, [](AsyncWebServerRequest *req)
+    {
+        if (!classroomInspectFinish())
+        {
+            req->send(409, "application/json", "{\"err\":\"no active task or measuring\"}");
             return;
         }
         req->send(200, "application/json", "{\"ok\":1}");
@@ -985,7 +1497,7 @@ bool webdashBegin(void)
 // ---------------- JSON 快照构建 ----------------
 // 格式: {"seq","samples","ovf","vmax","vmin","vavg","flk","fi","pst","svm","freq","zcode","zone",
 //        "cls":{"run","win","tot","m","freq"[,"res"]},"wmin":[...],"wmax":[...],"spec":[...]}
-static char jsonBuf[12 * 1024];
+static char jsonBuf[8 * 1024];   // WS 单帧 ≈5KB (256 波形 + 256 频谱 + 元数据); 常驻 BSS 吃紧, 不再冗余
 
 static size_t buildJson(const FlickerSnapshot *s)
 {
@@ -1047,6 +1559,28 @@ static size_t buildJson(const FlickerSnapshot *s)
                       (unsigned)cr.windows, sv);
     }
 
+    // 巡检任务 (v1.6): 当前任务号/教室/已完成点位掩码/待测点位 → 网页巡检区实时更新
+    const InspectionTask *it = classroomInspectTask();
+    if (it)
+    {
+        char rb[64];
+        jsonEscape(rb, sizeof(rb), it->room);
+        n += snprintf(jsonBuf + n, sizeof(jsonBuf) - n,
+                      ",\"ins\":{\"id\":%u,\"room\":\"%s\",\"mask\":%u,\"done\":%u,\"next\":%u}",
+                      (unsigned)it->id, rb, (unsigned)it->mask,
+                      (unsigned)it->pointsCount, (unsigned)classroomInspectNextPoint());
+
+        // 教室级汇总 (M2): 点位完成瞬间即可更新结论/建议, 不必等 /api/inspect 刷新
+        ClassroomSummary sm;
+        classroomSummarize(it->id, &sm);
+        if (sm.points > 0)
+        {
+            char sb[192];
+            jsonSummary(sb, sizeof(sb), sm);
+            n += snprintf(jsonBuf + n, sizeof(jsonBuf) - n, ",\"sm\":%s", sb);
+        }
+    }
+
     // LED 当前模式 (v1.3: 按键切换后网页 LED 页按钮高亮同步) + 云端状态 (v1.4)
     n += snprintf(jsonBuf + n, sizeof(jsonBuf) - n, ",\"led\":%u,\"cloud\":\"%s\"}}",
                   (unsigned)ledPwmGetMode(), cloudStateName());
@@ -1058,11 +1592,28 @@ static size_t buildJson(const FlickerSnapshot *s)
 void webdashBroadcast(const FlickerSnapshot *snap)
 {
     ws.cleanupClients();
-    if (ws.count() == 0)
+    uint16_t nCli = ws.count();
+    if (nCli == 0)
         return;                       // 无客户端时不构建 JSON, 节省 CPU
 
     size_t len = buildJson(snap);
     if (len == 0)
         return;
+
+    // 堆保护 (v1.6.1): AsyncWebSocket::textAll 为每个客户端 new[] 一份副本 (len+1), 堆不足时
+    // operator new 抛 std::bad_alloc → std::terminate → abort → 整机重启 (实测崩溃点)。
+    // 先估算所需堆, 不足则跳过本次广播 (下一窗口自动重试), 避免重启。
+    uint32_t need = (uint32_t)(len + 512) * (uint32_t)nCli + 2048;
+    if ((uint32_t)ESP.getFreeHeap() < need)
+    {
+        static uint32_t lastWarn = 0;
+        if (millis() - lastWarn > 5000)
+        {
+            lastWarn = millis();
+            Serial.printf("WARN: WS broadcast skipped, heap %d < need %u (min %d)\n",
+                          (int)ESP.getFreeHeap(), (unsigned)need, (int)ESP.getMinFreeHeap());
+        }
+        return;
+    }
     ws.textAll(jsonBuf, len);
 }
