@@ -52,6 +52,7 @@ static InspectionTask tasks[INSP_MAX_TASKS];
 static uint16_t taskCount = 0;          // 已存任务数
 static uint16_t taskSeq = 0;            // 任务号自增计数
 static int16_t inspCur = -1;            // 进行中任务在 tasks[] 的下标 (-1=无)
+static uint16_t zSeq = 0;               // 自动教室编号计数 (Z001 起, 存 NVS "insp/zseq")
 
 // 最近一次完成的结果 (供网页层取走)
 static bool resultPending = false;
@@ -79,6 +80,7 @@ static void nvsSaveInspMeta(void)
     prefsInsp.putUShort("cnt", taskCount);
     prefsInsp.putUShort("seq", taskSeq);
     prefsInsp.putUShort("cur", (inspCur >= 0) ? tasks[inspCur].id : 0);
+    prefsInsp.putUShort("zseq", zSeq);
 }
 
 static void inspLoad(void)
@@ -111,10 +113,22 @@ static void inspLoad(void)
                 break;
             }
     }
+    zSeq = prefsInsp.getUShort("zseq", 0);
+    for (uint16_t i = 0; i < taskCount; i++)        // 自动编号防回退: 历史任务中 Z 号更大则跟进
+        if (tasks[i].room[0] == 'Z' && tasks[i].room[1] >= '0' && tasks[i].room[1] <= '9')
+        {
+            uint16_t n = 0;
+            for (const char *p = tasks[i].room + 1; *p >= '0' && *p <= '9'; p++)
+                n = (uint16_t)(n * 10 + (*p - '0'));
+            if (n > zSeq)
+                zSeq = n;
+        }
     Serial.print("Inspect : ");
     Serial.print(taskCount);
     Serial.print(" task(s) loaded, current=");
-    Serial.println(inspCur >= 0 ? tasks[inspCur].id : 0);
+    Serial.print(inspCur >= 0 ? tasks[inspCur].id : 0);
+    Serial.print(", next auto room Z");
+    Serial.println(zSeq + 1);
 }
 
 void classroomBegin(void)
@@ -369,9 +383,10 @@ void classroomClear(void)
     prefs.clear();
     prefs.putUShort("cnt", 0);
 
-    // 记录清空后巡检任务的点位归属已不存在, 任务一并清空
+    // 记录清空后巡检任务的点位归属已不存在, 任务与自动编号一并清空
     taskCount = 0;
     taskSeq = 0;
+    zSeq = 0;
     inspCur = -1;
     prefsInsp.clear();
     Serial.println("Classroom: all records + inspection tasks cleared");
@@ -409,7 +424,7 @@ bool classroomInspectCreate(const char *room, const char *scene, const char *ins
     t.status = INSP_ST_RUN;
     t.mask = 0;
     t.pointsCount = 0;
-    t.verdict = 0xFF;                      // 保留: 设备端不汇总教室级结论 (前端按 5 点结果计算)
+    t.verdict = 0xFF;                      // 教室级结论未汇总 (每点完成/结束时由 classroomSummarize 刷新)
     inspCur = (int16_t)taskCount;
     taskCount++;
     nvsSaveTask((uint16_t)inspCur);
@@ -423,6 +438,27 @@ bool classroomInspectCreate(const char *room, const char *scene, const char *ins
     Serial.print(t.scene);
     Serial.println("\"");
     return true;
+}
+
+bool classroomInspectCreateAuto(uint32_t epoch)
+{
+    if (running || inspCur >= 0 || taskCount >= INSP_MAX_TASKS || recCount >= CLS_MAX_RECORDS)
+        return false;
+    zSeq++;
+    char room[8];
+    snprintf(room, sizeof(room), "Z%03u", (unsigned)zSeq);   // >999 自然进位 Z1000 (room[24] 足够)
+    if (!classroomInspectCreate(room, "OLED", "", epoch))
+    {
+        zSeq--;
+        return false;
+    }
+    // 编号已随 nvsSaveInspMeta() 落盘; room/scene/inspector 见上
+    return true;
+}
+
+uint16_t classroomInspectNextAutoNo(void)
+{
+    return (uint16_t)(zSeq + 1);
 }
 
 bool classroomInspectAbort(void)

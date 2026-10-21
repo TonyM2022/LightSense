@@ -7,7 +7,7 @@
 #define SAMPLE_RATE_HZ       20000                // 20 ksps
 #define FFT_SIZE             4096                 // 缓存点数 (2 的幂)
 #define BYTES_PER_SAMPLE     4                    // S3 DMA 每样本 4 字节
-#define DMA_BUF_BYTES        (FFT_SIZE * BYTES_PER_SAMPLE)
+#define DMA_BUF_BYTES        (FFT_SIZE * BYTES_PER_SAMPLE)      // 每块字节: 4096 帧 × 4B = 16KB
 #define BLOCKS_PER_REPORT    5                    // 5 块 ≈ 1.024 s 输出一次
 #define FFT_BIN_HZ           ((float)SAMPLE_RATE_HZ / (float)FFT_SIZE)
 #define PST_BIN_MAX          16                   // Pst 求和上限 bin (78.1 Hz, 加权覆盖至 80 Hz)
@@ -37,12 +37,13 @@
 
 // ---------------- 薄膜按键 (v1.3, 5 键独立 GPIO, 内部上拉, 公共端接 KEY_GND_PIN 虚拟 GND) ----------------
 // GPIO38~42 为 ESP32-S3 JTAG 复用引脚; 默认 JTAG 走 USB Serial/JTAG (19/20), 用作按键不受影响
-#define KEY_PIN_UP           40                   // GPIO40 上移
-#define KEY_PIN_DOWN         41                   // GPIO41 下移
-#define KEY_PIN_OK           42                   // GPIO42 确认
-#define KEY_PIN_LEFT         38                   // GPIO38 左移
-#define KEY_PIN_RIGHT        39                   // GPIO39 右移
-#define KEY_GND_PIN          21                   // GPIO21 常置低电平, 作按键模块公共端 (虚拟 GND)
+// v1.6.4 引脚重排: 薄膜排线反插修复 (原接线仅 GPIO39 一键导通, 全组对调成对交换)
+#define KEY_PIN_UP           41                   // GPIO41 上移
+#define KEY_PIN_DOWN         40                   // GPIO40 下移
+#define KEY_PIN_OK           38                   // GPIO38 确认
+#define KEY_PIN_LEFT         42                   // GPIO42 左移
+#define KEY_PIN_RIGHT        21                   // GPIO21 右移
+#define KEY_GND_PIN          39                   // GPIO39 常置低电平, 作按键模块公共端 (虚拟 GND)
 
 // ---------------- OneNET 云端 (v1.4, MQTT) ----------------
 // 连接参数 (WiFi 账号/产品 ID/设备名/Token) 不入库, 由网页 /setup 配置存 NVS,

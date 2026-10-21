@@ -134,6 +134,11 @@ const char *classroomPointName(uint8_t code);   // CLS_PT_* → "中心"/"左前
 // ---------------- 巡检任务层 (v1.6) ----------------
 // 新建巡检任务并置为当前 (已有进行中任务 / 任务已满 / 正在测量 → false)
 bool classroomInspectCreate(const char *room, const char *scene, const char *inspector, uint32_t epoch);
+// 自动编号新建巡检: 教室号自 "Z001" 起递增 (编号存 NVS 断电续号, 清空记录时重置), 场景记 "OLED"
+// 守卫: 正在测量 / 已有进行中任务 / 任务已满 / 记录已满 → false
+bool classroomInspectCreateAuto(uint32_t epoch);
+// 下一个自动教室编号数值 (供 OLED 预览 "Z%03u")
+uint16_t classroomInspectNextAutoNo(void);
 // 中止当前任务 (status → INSP_ST_STOP)
 bool classroomInspectAbort(void);
 

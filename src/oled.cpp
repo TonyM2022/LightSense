@@ -28,6 +28,17 @@ static bool s_enabled = false;
 static uint8_t s_page   = 0;     // 当前页 0=频闪仪 1=LED 控制 2=教室测量
 static uint8_t s_ledSel = 0;     // LED 页模式预选光标 (0..6, 确认前不改变输出)
 static uint8_t s_durSel = 0;     // 教室页时长光标 (0=30s 1=1min 2=10min)
+static uint8_t s_clsStage = 0;   // 教室页空闲菜单阶段 (0=选模式 1=选时长 2=确认启动)
+static uint8_t s_clsMode = 0;    // 教室页模式 (0=巡检自动编号 1=普通测量)
+static uint32_t s_msgUntil = 0;  // 临时提示截止时刻 (记录/任务已满等, 显示 3s)
+static char s_msg[26] = "";
+
+static void oledMsg(const char *txt)   // 设置临时提示 (下次绘制显示在底行)
+{
+    strncpy(s_msg, txt, sizeof(s_msg) - 1);
+    s_msg[sizeof(s_msg) - 1] = 0;
+    s_msgUntil = millis() + 3000;
+}
 
 // 教室时长档 (窗口数/名称, 与网页端三档一致)
 static const uint16_t DUR_WINDOWS[3] = {CLS_WINDOWS, CLS_WINDOWS_1MIN, CLS_WINDOWS_10MIN};
@@ -37,6 +48,21 @@ static const char *const DUR_NAMES[3] = {"30s", "1min", "10min"};
 static const char *const ZONE_OLED[] = {
     "合规 PASS", "超标", "Pst超标", "双超标", "超标", "SVM超标", "过暗", "过亮"
 };
+
+// 教室级结论短文案 (CLS_SUM_* 0~3, 比网页全文案短一档; 0xFF=旧任务未汇总 → 兜底 "--")
+static const char *const SUM_OLED[] = {"--", "A 合规", "B 局部风险", "C 整体风险"};
+
+// UTF-8 安全截断: 超宽则从末尾逐整字裁剪 (动态内容如网页建的长教室号可能超 128 列,
+// 本模块超右界会包绕回左侧叠印, 故绘制前必须保证宽度)
+static void fitUTF8(char *s, uint16_t maxW)
+{
+    while (*s && u8g2.getUTF8Width(s) > maxW)
+    {
+        char *p = s + strlen(s) - 1;
+        while (p > s && (*p & 0xC0) == 0x80) p--;    // 回退到 UTF-8 序列首字节
+        *p = 0;
+    }
+}
 
 bool oledBegin(void)
 {
@@ -171,6 +197,7 @@ static void drawClassroomPage(void)
     if (it)
     {
         snprintf(buf, sizeof(buf), "教室 %s  %u/5", it->room, (unsigned)it->pointsCount);
+        fitUTF8(buf, 124);                  // 网页可建长教室号, 防包绕
         u8g2.drawUTF8(4, 26, buf);
         uint8_t nx = classroomInspectNextPoint();
         if (nx)
@@ -186,33 +213,88 @@ static void drawClassroomPage(void)
         return;
     }
 
-    // 上次已完成的巡检: 显示教室级结论简版 (M2 设备端汇总; 上下键仍可改时长)
+    // 空闲且无任务: 三步菜单 (第 1 步选模式, 第 2 步选时长, 第 3 步确认启动+测位示意)
     uint16_t nt = 0;
     const InspectionTask *ts = classroomTasks(&nt);
     const InspectionTask *last = NULL;
     for (uint16_t i = 0; i < nt; i++)
         if (ts[i].status == INSP_ST_DONE && ts[i].pointsCount > 0)
             last = &ts[i];
-    if (last)
+
+    if (s_clsStage == 0)
     {
-        ClassroomSummary sm;
-        classroomSummarize(last->id, &sm);
-        snprintf(buf, sizeof(buf), "上次 %s %u/5", last->room, (unsigned)sm.points);
-        u8g2.drawUTF8(4, 26, buf);
-        if (sm.verdict == CLS_SUM_PASS)
-            snprintf(buf, sizeof(buf), "A 合规 5 点全通过");
-        else if (sm.verdict == CLS_SUM_LOCAL)
-            snprintf(buf, sizeof(buf), "B 局部 %u点 %s", (unsigned)sm.failCnt, classroomPointName(sm.worstCode));
-        else if (sm.verdict == CLS_SUM_ALL)
-            snprintf(buf, sizeof(buf), "C 整体 %u点 %s", (unsigned)sm.failCnt, classroomPointName(sm.worstCode));
+        // 第 1 步: 模式选择 (反白光标; 巡检项实时预览下一个自动编号)
+        char pre[8];
+        snprintf(pre, sizeof(pre), "Z%03u", (unsigned)classroomInspectNextAutoNo());
+        const char *modes[2] = {"巡检", "普通测量"};
+        const int xm[2] = {4, 78};
+        for (int i = 0; i < 2; i++)
+        {
+            char item[14];
+            snprintf(item, sizeof(item), "%s%s", modes[i], (i == 0) ? pre : "");
+            if (i == (int)s_clsMode)
+            {
+                int w = u8g2.getUTF8Width(item);
+                u8g2.drawBox(xm[i] - 2, 15, w + 4, 12);
+                u8g2.setDrawColor(0);
+                u8g2.drawUTF8(xm[i], 26, item);
+                u8g2.setDrawColor(1);
+            }
+            else
+                u8g2.drawUTF8(xm[i], 26, item);
+        }
+        if (last)
+        {
+            ClassroomSummary sm;
+            classroomSummarize(last->id, &sm);
+            snprintf(buf, sizeof(buf), "上次 %s:%s", last->room,           // 冒号后省空格省 6px,
+                     SUM_OLED[sm.verdict <= 3 ? sm.verdict : 0]);          // 常规 "Zxxx+B 局部风险" 恰好 120px
+        }
         else
-            snprintf(buf, sizeof(buf), "未测全, 无教室结论");
-        u8g2.drawUTF8(4, 42, buf);
-        snprintf(buf, sizeof(buf), "OK:开始测量 %s", DUR_NAMES[s_durSel]);
-        u8g2.drawUTF8(4, 60, buf);
+            snprintf(buf, sizeof(buf), "暂无巡检记录");
+        fitUTF8(buf, 124);                  // 兜底: 长教室号时截尾, 防包绕
+        u8g2.drawUTF8(4, 44, buf);
+        u8g2.drawUTF8(4, 60, "OK:下一步 上下切换");
         return;
     }
 
+    if (s_clsStage == 2)
+    {
+        // 第 3 步: 启动确认 — 巡检显示教室 5 点测位示意, 上下键返回上一步
+        if (s_clsMode == 0)
+            snprintf(buf, sizeof(buf), "巡检 Z%03u  %s",
+                     (unsigned)classroomInspectNextAutoNo(), DUR_NAMES[s_durSel]);
+        else
+            snprintf(buf, sizeof(buf), "普通测量  %s", DUR_NAMES[s_durSel]);
+        fitUTF8(buf, 124);
+        u8g2.drawUTF8(4, 25, buf);
+        if (s_clsMode == 0)
+        {
+            u8g2.drawFrame(24, 28, 80, 21);      // 教室轮廓 (x24..103, y28..48)
+            u8g2.drawDisc(30, 34, 2);            // 左前
+            u8g2.drawDisc(98, 34, 2);            // 右前
+            u8g2.drawDisc(64, 39, 2);            // 中心
+            u8g2.drawDisc(30, 44, 2);            // 左后
+            u8g2.drawDisc(98, 44, 2);            // 右后
+            u8g2.drawUTF8(36, 38, "LF");
+            u8g2.drawUTF8(78, 38, "RF");
+            u8g2.drawBox(67, 34, 12, 12);        // C 反白高亮: 下一测点 (按 OK 后首先测量)
+            u8g2.setDrawColor(0);
+            u8g2.drawUTF8(69, 43, "C");
+            u8g2.setDrawColor(1);
+            u8g2.drawUTF8(36, 47, "LB");
+            u8g2.drawUTF8(78, 47, "RB");
+        }
+        else
+            u8g2.drawUTF8(4, 44, "灯具自动编号");
+        if (s_clsMode == 0)
+            u8g2.drawUTF8(4, 61, "OK:测C点 上下:返回");
+        else
+            u8g2.drawUTF8(4, 61, "OK:开始 上下:返回");
+        return;
+    }
+
+    // 第 2 步: 三档时长选择 (上下键循环, 反白光标, 沿用原样式)
     u8g2.drawUTF8(4, 26, "测量时长:");
     const int xs[3] = {4, 46, 94};
     for (int i = 0; i < 3; i++)
@@ -230,10 +312,11 @@ static void drawClassroomPage(void)
             u8g2.drawUTF8(xs[i], 44, DUR_NAMES[i]);
         }
     }
-    u8g2.drawUTF8(4, 60, "OK 键: 开始测量");
+    u8g2.drawUTF8(4, 60, "OK:下一步 上下选时长");   // 临时提示由 drawAll 底行反白条统一覆盖
 }
 
 // ---------------- 统一绘制入口 ----------------
+// 底行临时提示 (oledMsg): 反白横条覆盖三页任一底行, 全页可见 (任务/记录已满/电量低等)
 static void drawAll(const FlickerSnapshot *snap)
 {
     u8g2.clearBuffer();
@@ -244,6 +327,13 @@ static void drawAll(const FlickerSnapshot *snap)
     case 1:  drawLedPage();        break;
     default: drawClassroomPage();  break;
     }
+    if (millis() < s_msgUntil && s_msg[0])
+    {
+        u8g2.drawBox(0, 52, 128, 12);
+        u8g2.setDrawColor(0);
+        u8g2.drawUTF8(4, 62, s_msg);
+        u8g2.setDrawColor(1);
+    }
     u8g2.sendBuffer();
 }
 
@@ -251,6 +341,7 @@ static void drawAll(const FlickerSnapshot *snap)
 void oledShow(const FlickerSnapshot *snap)
 {
     if (!s_enabled) return;
+
     drawAll(snap);
 }
 
@@ -264,9 +355,11 @@ void oledHandleKey(uint8_t ev)
     {
     case KEY_LEFT:
         s_page = (s_page + 2) % 3;
+        if (s_page == 2) s_clsStage = 0;    // 进入教室页回到菜单第 1 步
         break;
     case KEY_RIGHT:
         s_page = (s_page + 1) % 3;
+        if (s_page == 2) s_clsStage = 0;
         break;
     case KEY_UP:
     case KEY_DOWN:
@@ -276,7 +369,12 @@ void oledHandleKey(uint8_t ev)
         }
         else if (s_page == 2 && !classroomIsRunning())
         {
-            s_durSel = (uint8_t)((s_durSel + ((ev == KEY_DOWN) ? 1 : 2)) % 3);
+            if (classroomInspectActive() || s_clsStage == 1)
+                s_durSel = (uint8_t)((s_durSel + ((ev == KEY_DOWN) ? 1 : 2)) % 3);
+            else if (s_clsStage == 2)
+                s_clsStage = 1;                          // 第 3 步上下键: 返回选时长
+            else
+                s_clsMode = (uint8_t)(1 - s_clsMode);   // 第 1 步: 巡检(自动编号) ↔ 普通测量
         }
         break;                              // 页 1 (频闪仪) 上下键无动作 (按需求)
     case KEY_OK:
@@ -294,9 +392,28 @@ void oledHandleKey(uint8_t ev)
                 else
                     classroomInspectFinish();
             }
+            else if (s_clsStage < 2)
+            {
+                s_clsStage++;                        // 第 1/2 步确认 → 下一步 (模式 → 时长 → 确认)
+            }
+            else if (s_clsMode == 0)
+            {
+                // 第 3 步确认 (巡检): 教室号自动编号 (Z001 起递增) 建任务并立即开始 C 点测量
+                if (classroomInspectCreateAuto(0))
+                {
+                    s_clsStage = 0;                  // 菜单复位, 下次空闲回第 1 步
+                    classroomInspectStartPoint(classroomInspectNextPoint(), DUR_WINDOWS[s_durSel], 0);
+                }
+                else
+                    oledMsg("任务/记录已满");
+            }
+            else if (classroomStart(NULL, DUR_WINDOWS[s_durSel]))    // 普通测量 (NULL → 自动命名灯具 N)
+            {
+                s_clsStage = 0;
+            }
             else
             {
-                classroomStart(NULL, DUR_WINDOWS[s_durSel]);   // NULL → 自动命名灯具 N
+                oledMsg("记录已满, 请先清空");
             }
         }
         break;                              // 页 3 运行中确认忽略 (防误触重启)
