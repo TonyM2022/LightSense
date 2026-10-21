@@ -48,7 +48,7 @@ LED 标准闪烁源与教室灯光测量记录功能。
 | 灯具趋势分析 | 同一标签（= 同一灯具）的历次测量按时间轴对比，Theil-Sen 稳健回归给出恶化/改善趋势等级与越限预测，附光衰提示 |
 | 教室巡检（5 点） | 一次巡检含教室号/场景/巡检人，按标准 5 点模板（中心 + 四角）逐点测量，点位归属任务；教室级 A/B/C 汇总判定 + 最差点位 + 整改建议 + 前后两次巡检对比（v1.6） |
 | OLED 本地显示 + 五键交互 | 1.54" SSD1309 OLED（软件模拟 I2C）+ 5 键薄膜按键，三页面与网页页签一致，离线完成 LED 切换与教室测量 |
-| OneNET 云端接入 | MQTT 接入 OneNET Studio 物模型平台（OneJSON），30 s 周期属性上云、教室记录事件补传（断点续传）、LED 远程控制；网页 `/setup` 配网，AP+STA 共存本地功能不受影响 |
+| WiFi STA 联网 | 网页 `/setup` 配置路由器账号（密码可空 = 开放网络）后 AP+STA 联网，NTP 校时为教室记录提供真实日期；OneNET 云端接入 v1.6.5 起暂停（代码注释保留，可恢复） |
 
 ## 硬件结构
 
@@ -102,7 +102,7 @@ main.cpp (编排层)
 │                        填充 FlickerSnapshot 网页快照)           │
 ├──────────────────────────────────────────────────────────────┤
 │ 应用层    classroom.* 教室测量: 逐窗聚合 + 三档时长 + NVS 存储    │
-│           cloud.*     OneNET 云端: 属性上报/记录补传/远程控制     │
+│           cloud.*     STA 联网 + NTP 校时 (OneNET 暂停: MQTT 注释保留)│
 ├──────────────────────────────────────────────────────────────┤
 │ 网页层    webdash.*   AP 热点 + AsyncWebServer + WebSocket 广播 │
 │                       (内嵌单页面前端, 三页面切换)               │
@@ -177,7 +177,7 @@ LightSense/
 │   ├── webdash.h/.cpp    # 网页层: AP 热点 + 异步服务器 + WebSocket + 内嵌前端
 │   ├── keypad.h/.cpp     # 按键层: 5 键轮询消抖 + 事件队列
 │   ├── oled.h/.cpp       # 显示层: U8g2 SSD1309 OLED (三页交互, 软件模拟 I2C)
-│   ├── cloud.h/.cpp      # 云端层: OneNET MQTT 状态机 + 属性/事件上报 + LED 远程控制 + NTP 校时
+│   ├── cloud.h/.cpp      # 云端层: STA WiFi 联网 + NTP 校时 (OneNET MQTT 上报/补传/下行 v1.6.5 起注释保留, 可恢复)
 │   ├── cloud_cfg.h.example # 云端 Token 生成方法示例 (凭据经 /setup 页存 NVS, 不入库)
 ├── readme.md             # 本文件
 └── .gitignore            # 忽略 .pio/ 等构建产物
@@ -198,9 +198,7 @@ LightSense/
 | `KEY_GND_PIN` | GPIO39 | 按键模块公共端（固件常置低电平，虚拟 GND） |
 | `OLED_SDA` / `OLED_SCL` | 4 / 5 | OLED I2C 引脚（软件模拟，板载丝印 SDA/SCL） |
 | `KEY_PIN_UP/DOWN/OK/LEFT/RIGHT` | 41/40/38/42/21 | 五键薄膜按键引脚（内部上拉，公共端接 `KEY_GND_PIN`） |
-| `CLOUD_MQTT_HOST` / `CLOUD_MQTT_PORT` | mqtts.heclouds.com / 1883 | OneNET Studio MQTT 接入点 |
-| `CLOUD_SNAPSHOT_SEC` / `CLOUD_RETRY_SEC` | 30 / 10 | 周期属性上报间隔 / 重连退避 |
-| `CLOUD_PUB_ENABLE` / `CLOUD_REC_ENABLE` / `CLOUD_PROBE` | 1 / 1 / 0 | 云端开关（属性上报 / 记录补传 / 诊断探测，平时 0） |
+| `CLOUD_*`（7 项宏） | — | OneNET 云端配置，v1.6.5 起整块注释停用（恢复：取消 config.h 与 cloud.cpp 中各注释段） |
 
 ## 使用说明
 
@@ -353,6 +351,12 @@ SVM 超标→核实驱动器纹波抑制、避免低成本 PWM 调光；光照�
 
 ### OneNET 云端接入（v1.4）
 
+> **v1.6.5 起暂停使用**：MQTT 属性上报 / 教室记录补传 / LED 远程控制已整段注释（代码保留可恢复），
+> 固件现仅保留 STA 联网 + NTP 校时；`/setup` 页精简为 WiFi 联网配置（仅账号/密码，
+> 联网条件放宽为仅需 WiFi 名称）。恢复方法：取消 cloud.cpp 各 `#if 0` 段 +
+> config.h 的 `CLOUD_*` 宏 + webdash.cpp /setup 页隐藏的三个输入框。
+> 以下为恢复后的完整功能说明。
+
 设备可接入移动 OneNET Studio 物模型平台（MQTT，`mqtts.heclouds.com:1883`），
 实现数据上云与远程控制，全部通信遵循官方 OneJSON 协议：
 
@@ -416,7 +420,7 @@ Zone     : Light+Pst+SVM FAIL-BOTH
 | POST | `/api/inspect/start?room=教室号&scene=场景&ins=巡检人&t=Unix秒` | 新建巡检任务并置为当前（room 必填；已有进行中任务 / 任务已满 / 正在测量返回 409） |
 | POST | `/api/inspect/finish` | 结束当前巡检任务（不要求 5 点齐全） |
 | POST | `/api/inspect/abort` | 中止当前巡检任务（已测记录保留） |
-| GET | `/setup` | 云端配网页面（WiFi 账号/密码、产品 ID、设备名、Token，存 NVS） |
+| GET | `/setup` | 联网配置页面（WiFi 账号/密码，存 NVS；v1.6.5 起 OneNET 产品 ID/设备名/Token 输入框隐藏） |
 
 ### 自测参考值（LED 自测档，外接 LED 方波 50% 占空比）
 
@@ -463,6 +467,7 @@ Zone     : Light+Pst+SVM FAIL-BOTH
 | v1.4 | OneNET 云端层：MQTT 属性上报（30 s）/ 教室记录事件补传（NVS 位图断点续传）/ LED 远程控制；网页 /setup 配网（WiFi 扫描下拉 + 255 字符 Token）；按 OneJSON 官方协议对齐（property/post + event/post + set），修复 lux int32 类型、pst 步长校验、记录位图 NVS 持久化等问题 |
 | v1.5 | 灯具趋势分析：教室记录新增 Unix 时间戳（浏览器时间优先 + NTP 兜底，NVS 第 5 代 blob 向后兼容）；网页教室页新增趋势卡片（同标签按时间轴对比、Theil-Sen 稳健回归、趋势等级、越限预测、光衰预警条）、历史标签复用下拉，记录表与 CSV 加日期列 |
 | v1.6 | 教室巡检（5 点）：记录新增 taskId/pointCode（NVS 第 6 代 blob 向后兼容）、InspectionTask 任务层（教室号/场景/巡检人/已完成点位，NVS `insp` namespace，断电可恢复）；5 点逐点流程（标签自动 `<教室号>-<点位码>`，完成后自动推进）；`/api/inspect*` 4 个端点 + `/api/classroom/start?pt=`；网页教室页新增巡检三卡片（任务 / 教室级 A·B·C 汇总 + 最差点位 + 整改建议 / 复测对比）；OLED 教室页巡检提示与 OK 语义改为「测此点」；记录上限 50 → 80 条。v1.6.1：教室级汇总判定与建议规则下沉到设备端（`classroomSummarize()` + `CLS_ADV_*` 位掩码，中心点异常并入 C），`/api/inspect` 与 WS 帧新增 `sum`，OLED 空闲时显示上次巡检结论。v1.6.2：一页式巡检摘要报告导出（纯前端生成，含基本信息 / 点位结果 / 教室级结论 / 整改建议 / 复测对比，浏览器打印或存 PDF；`/api/inspect` 任务列表补 `ins` 巡检人字段）。v1.6.3：OLED 教室页两步菜单（模式选择 → 时长选择）离线发起巡检/普通测量，教室号自动编号 `Z001` 起递增（NVS `insp/zseq` 断电续号、清空记录重置、历史 Z 号防回退），任务/记录已满时底行临时提示。v1.6.4：薄膜按键引脚重排（上/下/OK/左/右 = 41/40/38/42/21，公共端 39，排线反插修复）；OLED 教室页「上次结论」行改短文案（A 合规/B 局部风险/C 整体风险）并加 UTF-8 安全截断，修复超 128 列包绕叠印；空闲菜单扩为三步（模式 → 时长 → 确认启动，第 3 步显示 5 点测位示意、C 反白标示下一测点，上下键可返回） |
+| v1.6.5 | OneNET 云端暂停：MQTT 属性上报 / 教室记录补传 / LED 远程控制整段注释保留（cloud.cpp `#if 0` + config.h `CLOUD_*` 宏注释 + /setup 页产品 ID/设备名/Token 输入框隐藏，取消注释即可恢复）；保留 STA WiFi 联网 + NTP 校时（教室记录真实日期不受影响），联网条件放宽为仅需 WiFi 名称（密码可空 = 开放网络）；快照 `cloud` 状态 ONLINE 语义改为「STA 已连」；/setup 页更名「WiFi 联网配置」；RAM 45.2%→44.7%、Flash 43.0%→42.4% |
 
 ## 参考来源
 

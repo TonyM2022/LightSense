@@ -1,12 +1,16 @@
 // ---------------- OneNET 云端层实现 ----------------
-// 状态机: CL_OFF → CL_WAIT_WIFI → CL_CONNECTING → CL_ONLINE (掉线回退)
+// OneNET 暂停使用 (用户指令): MQTT 属性上报/记录补传/下行控制整段注释保留,
+// 仅保留 STA WiFi 联网 + NTP 校时 (cloudEpoch 供教室记录填真实测量日期)。
+// 恢复方法: 取消本文件内各 #if 0 / // 段 + config.h 的 CLOUD_* 宏
+//           + webdash.cpp /setup 页隐藏的 OneNET 三个输入框。
+// 状态机: CL_OFF → CL_WAIT_WIFI → CL_ONLINE (掉线回退; ONLINE 现语义 = STA 已连)
 // 防阻塞纪律:
-//   - WiFi.begin/mqtt.connect 每次只在状态切换点执行一次, 失败退避 CLOUD_RETRY_SEC
-//   - mqtt.connect 前必须确认 WiFi 已连上 (PubSubClient 掉线时 connect 会阻塞 socket 超时)
-//   - mqtt.setSocketTimeout(4) 收紧 connect 阻塞上限 (默认 15s)
+//   - WiFi.begin 每次只在状态切换点执行一次, 断线由 setAutoReconnect 自动重试
+//   - (恢复 MQTT 后) mqtt.connect 每次只在状态切换点执行一次, 失败退避 CLOUD_RETRY_SEC
+//   - (恢复 MQTT 后) mqtt.connect 前必须确认 WiFi 已连上 (PubSubClient 掉线时 connect 会阻塞 socket 超时)
 #include <Arduino.h>
 #include <WiFi.h>
-#include <PubSubClient.h>
+// #include <PubSubClient.h>                      // OneNET 停用: 恢复时取消注释
 #include <Preferences.h>
 #include <time.h>
 #include "config.h"
@@ -16,19 +20,21 @@
 #include "cloud.h"
 
 static Preferences prefs;
-static WiFiClient netClient;
-static PubSubClient mqtt(netClient);
+// static WiFiClient netClient;                   // OneNET 停用
+// static PubSubClient mqtt(netClient);           // OneNET 停用
 
-// 连接参数 (cloudBegin 从 NVS 读入)
-static char cfgSsid[33], cfgPass[65], cfgPid[25], cfgDev[25], cfgTok[257];
+// 连接参数 (cloudBegin 从 NVS 读入; pid/dev/tok 为 OneNET 专用, 暂停读取)
+static char cfgSsid[33], cfgPass[65];
+// static char cfgPid[25], cfgDev[25], cfgTok[257];
 static bool cfgOk = false;
 
 static CloudState st = CL_OFF;
-static uint32_t lastMqttTry = 0, lastPub = 0, lastRecPub = 0;
-static const FlickerSnapshot *lastSnap = NULL;
+// static uint32_t lastMqttTry = 0, lastPub = 0, lastRecPub = 0;   // OneNET 停用
+// static const FlickerSnapshot *lastSnap = NULL;                  // OneNET 停用
 static bool ntpStarted = false;   // SNTP 只发起一次 (库内部自动周期再同步)
 
-// MQTT topic (OneNET Studio OneJSON 物模型, 官方文档 detail/902)
+// OneNET 停用: MQTT topic (OneJSON 物模型, 官方文档 detail/902)
+#if 0
 static char upTopic[96];      // $sys/{pid}/{dev}/thing/property/post       属性上报 (OneJSON)
 static char downTopic[96];    // $sys/{pid}/{dev}/thing/property/set        属性设置下行 (LED 远程控制)
 static char recTopic[96];     // $sys/{pid}/{dev}/thing/event/post          教室记录补传 (物模型事件 record, 输出参数 data:string)
@@ -36,7 +42,9 @@ static char repTopic[112];    // $sys/{pid}/{dev}/thing/property/post/reply 属�
 static char evRepTopic[112];  // $sys/{pid}/{dev}/thing/event/post/reply    事件上报应答 (平台校验结果)
 static char setRepTopic[112]; // $sys/{pid}/{dev}/thing/property/set_reply  属性设置应答
 static char dpTopic[96];      // $sys/{pid}/{dev}/dp/post/json              老版数据点 (仅 CLOUD_PROBE=2 探测用)
+#endif
 
+#if 0                                           // ===== OneNET 停用: 补传队列/上下行/回调整段 =====
 // 教室记录待同步: 队列 (新记录优先) + NVS 位图 (断网期间历史记录补传)
 #define CLOUD_PEND_CAP 8
 static ClassroomRecord pendRec[CLOUD_PEND_CAP];
@@ -246,6 +254,7 @@ static bool enqueueNextUnsynced(void)
     }
     return false;
 }
+#endif                                          // ===== OneNET 停用段结束 =====
 
 // ---------------- 接口实现 ----------------
 void cloudBegin(void)
@@ -253,18 +262,23 @@ void cloudBegin(void)
     prefs.begin("cloud", true);
     prefs.getString("ssid", cfgSsid, sizeof(cfgSsid));
     prefs.getString("pass", cfgPass, sizeof(cfgPass));
+#if 0                                           // OneNET 停用: 恢复时取消注释
     prefs.getString("pid", cfgPid, sizeof(cfgPid));
     prefs.getString("dev", cfgDev, sizeof(cfgDev));
     prefs.getString("tok", cfgTok, sizeof(cfgTok));
     syncMap = prefs.getULong64("syncmap", 0ULL);
+#endif
     prefs.end();
 
+#if 0                                           // OneNET 停用: MQTT 初始化
     mqtt.setServer(CLOUD_MQTT_HOST, CLOUD_MQTT_PORT);
     mqtt.setSocketTimeout(4);
     mqtt.setKeepAlive(120);              // OneNET 要求 keepalive 30~1200s (PubSubClient 默认 15s 超下限)
     mqtt.setBufferSize(1024);            // 防平台下行大包 (期望值同步) 超缓冲导致自断
     mqtt.setCallback(onMqttMsg);
+#endif
 
+#if 0                                           // OneNET 停用: topic 拼接
     snprintf(upTopic, sizeof(upTopic), "$sys/%s/%s/thing/property/post", cfgPid, cfgDev);
     snprintf(downTopic, sizeof(downTopic), "$sys/%s/%s/thing/property/set", cfgPid, cfgDev);
     snprintf(recTopic, sizeof(recTopic), "$sys/%s/%s/thing/event/post", cfgPid, cfgDev);
@@ -272,20 +286,19 @@ void cloudBegin(void)
     snprintf(evRepTopic, sizeof(evRepTopic), "$sys/%s/%s/thing/event/post/reply", cfgPid, cfgDev);
     snprintf(setRepTopic, sizeof(setRepTopic), "$sys/%s/%s/thing/property/set_reply", cfgPid, cfgDev);
     snprintf(dpTopic, sizeof(dpTopic), "$sys/%s/%s/dp/post/json", cfgPid, cfgDev);
+#endif
 
     Serial.print("Cloud  : ");
-    if (cfgSsid[0] == 0 || cfgPid[0] == 0 || cfgDev[0] == 0 || cfgTok[0] == 0)
+    if (cfgSsid[0] == 0)                 // 联网条件放宽: 仅需 WiFi 名称 (密码可空 = 开放网络)
     {
-        Serial.println("not configured (open http://192.168.4.1/setup)");
+        Serial.println("WiFi not configured (open http://192.168.4.1/setup)");
         st = CL_OFF;
         return;                          // 未配置: 维持纯 AP (webdashBegin 置 WIFI_AP)
     }
     cfgOk = true;
-    Serial.print("OneNET dev=");
-    Serial.print(cfgDev);
-    Serial.print(", WiFi \"");
+    Serial.print("STA WiFi \"");
     Serial.print(cfgSsid);
-    Serial.println("\"");
+    Serial.println("\" (OneNET disabled)");
     WiFi.mode(WIFI_AP_STA);              // AP+STA 共存: 本地仪表照常可用
     WiFi.setAutoReconnect(true);
     WiFi.setSleep(false);
@@ -297,7 +310,7 @@ void cloudTick(void)
 {
     if (!cfgOk)
         return;
-    uint32_t now = millis();
+    // uint32_t now = millis();         // OneNET 停用: 恢复上报节流时取消注释
 
     if (st == CL_WAIT_WIFI)
     {
@@ -311,22 +324,22 @@ void cloudTick(void)
                 ntpStarted = true;
                 Serial.println("Cloud  : NTP sync requested");
             }
-            st = CL_CONNECTING;
-            lastMqttTry = 0;             // 立即尝试 MQTT
+            // lastMqttTry = 0;          // OneNET 停用
+            st = CL_ONLINE;              // WiFi 连上即 ONLINE (原: CL_CONNECTING 后再握手 MQTT)
         }
         return;
     }
 
     if (WiFi.status() != WL_CONNECTED)   // 已连接状态下掉线 → 回退重等
     {
-        if (mqtt.connected())
-            mqtt.disconnect();
+        // mqtt.disconnect();            // OneNET 停用
         Serial.println("Cloud  : WiFi lost");
         st = CL_WAIT_WIFI;
-        backfillDone = false;
+        // backfillDone = false;         // OneNET 停用
         return;
     }
 
+#if 0                                           // ===== OneNET 停用: MQTT 连接/订阅/上报/补传 =====
     if (!mqtt.connected())
     {
         if (st == CL_ONLINE)             // 会话曾被踢: 打一条定位平台断连
@@ -384,29 +397,35 @@ void cloudTick(void)
                 backfillDone = true;     // 全部同步过
         }
     }
+#endif                                          // ===== OneNET 停用段结束 =====
 }
 
 void cloudOnSnapshot(const FlickerSnapshot *s)
 {
-    lastSnap = s;
+    (void)s;                             // OneNET 停用: 快照缓存无消费者, 空操作保 API
+    // lastSnap = s;
 }
 
 void cloudPushRecord(const ClassroomRecord *r, uint16_t idx)
 {
-    if (!cfgOk)
-        return;
-    pushPend(r, idx);
-    backfillDone = false;
+    (void)r; (void)idx;                  // OneNET 停用: 补传队列已注释, 空操作保 API
+    // if (!cfgOk)
+    //     return;
+    // pushPend(r, idx);
+    // backfillDone = false;
 }
 
 void cloudResetSync(void)
 {
+    // OneNET 停用: 同步位图已注释, 清空记录时无需处理
+#if 0
     syncMap = 0;
     pendHead = pendTail = pendCnt = 0;
     backfillDone = true;
     prefs.begin("cloud", false);
     prefs.putULong64("syncmap", 0ULL);
     prefs.end();
+#endif
 }
 
 CloudState cloudGetState(void)
@@ -419,8 +438,8 @@ const char *cloudStateName(void)
     switch (cloudGetState())
     {
     case CL_WAIT_WIFI:  return "WAIT-WIFI";
-    case CL_CONNECTING: return "MQTT";
-    case CL_ONLINE:     return "ONLINE";
+    case CL_CONNECTING: return "MQTT";   // OneNET 停用后不可达, 保留映射便于恢复
+    case CL_ONLINE:     return "ONLINE"; // 现语义 = STA 已连
     default:            return "OFF";
     }
 }
@@ -437,21 +456,24 @@ bool cloudCfgGet(char *ssid, size_t ss, char *pass, size_t ps,
 {
     snprintf(ssid, ss, "%s", cfgSsid);
     snprintf(pass, ps, "%s", cfgPass);
-    snprintf(pid, pp, "%s", cfgPid);
-    snprintf(dev, ds, "%s", cfgDev);
-    snprintf(tok, ts, "%s", cfgTok);
+    snprintf(pid, pp, "%s", "");         // OneNET 停用: /setup 页输入框已隐藏, 回显空值
+    snprintf(dev, ds, "%s", "");
+    snprintf(tok, ts, "%s", "");
     return cfgOk;
 }
 
 bool cloudCfgSave(const String &ssid, const String &pass, const String &pid,
                   const String &dev, const String &tok)
 {
+    (void)pid; (void)dev; (void)tok;     // OneNET 停用: 仅存 WiFi 账号密码
     prefs.begin("cloud", false);
     prefs.putString("ssid", ssid);
     prefs.putString("pass", pass);
+#if 0                                           // OneNET 停用: 恢复时取消注释
     prefs.putString("pid", pid);
     prefs.putString("dev", dev);
     prefs.putString("tok", tok);
+#endif
     prefs.end();
     return true;                         // 重启后生效
 }

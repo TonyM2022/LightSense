@@ -1071,7 +1071,7 @@ static int jsonSummary(char *dst, size_t cap, const ClassroomSummary &sm)
 static const char SETUP_HTML[] PROGMEM = R"rawliteral(
 <!doctype html><html lang=zh><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
-<title>LightSense 云端配置</title>
+<title>LightSense WiFi 配置</title>
 <style>
 body{font-family:system-ui,'Microsoft YaHei',sans-serif;background:#0f172a;color:#e2e8f0;display:flex;justify-content:center;padding:24px;margin:0}
 form{background:#1e293b;padding:20px;border-radius:12px;max-width:420px;width:100%}
@@ -1084,16 +1084,19 @@ button{margin-top:16px;width:100%;padding:10px;border:0;border-radius:8px;backgr
 button:disabled{opacity:.5}.msg{margin-top:10px;font-size:13px;color:#7dd3fc}
 .st{margin-top:14px;font-size:13px}
 </style></head><body><form id=f>
-<h2>OneNET 云端配置</h2>
-<p>参数存设备本地 NVS, 不上传; Token 生成方法见仓库 src/cloud_cfg.h.example</p>
+<h2>WiFi 联网配置</h2>
+<p>参数存设备本地 NVS, 不上传; 用于教室现场 STA 联网与 NTP 校时 (OneNET 暂停使用)</p>
 <label>WiFi 名称 (SSID)</label>
 <select id=ssidsel><option value="">— 点击下方按钮扫描 WiFi —</option></select>
 <div class=sc><button id=scant type=button>扫描 WiFi</button><div class=msg id=scanm style="margin:0"></div></div>
 <input id=ssid maxlength=32 placeholder="也可直接手动输入 WiFi 名称">
 <label>WiFi 密码 (可空 = 开放网络)</label><input id=pass maxlength=64>
+<!-- OneNET 暂停使用: 输入框隐藏, 保留元素以兼容 JS 回显/提交; 恢复时去掉外层 display:none -->
+<div style="display:none">
 <label>产品 ID (product_id)</label><input id=pid maxlength=24>
 <label>设备名称 (device_name)</label><input id=dev maxlength=24>
 <label>设备 Token (MQTT 密码, 整串)</label><input id=tok maxlength=255>
+</div>
 <button id=b type=submit>保存并重启</button>
 <div class=msg id=m></div>
 <div class=st id=s></div>
