@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LightSense OLED 页面草图（128×64）</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; padding: 36px 28px 60px; background: #fff; color: #111;
+         font: 14px/1.65 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+  main { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 24px; margin: 0 0 6px; }
+  h2 { font-size: 18px; margin: 36px 0 12px; border-bottom: 1px solid #ddd; padding-bottom: 6px; }
+  p.sub { margin: 0 0 22px; color: #555; }
+  code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12.5px; background: #f5f5f5; padding: 1px 4px; }
+  .meta { border: 1px solid #ddd; padding: 14px 16px; margin: 0 0 10px; }
+  .meta ul { margin: 0; padding-left: 20px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border: 1px solid #ccc; padding: 6px 8px; vertical-align: top; text-align: left; }
+  th { background: #fafafa; font-weight: 600; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(540px, 1fr)); gap: 26px; }
+  .card { margin: 0; border: 1px solid #ddd; padding: 14px 14px 10px; break-inside: avoid; }
+  .card figcaption { font-weight: 600; margin: 0 0 10px; }
+  .num { display: inline-block; min-width: 2ch; color: #555; font-variant-numeric: tabular-nums; }
+  .card img { display: block; border: 1px solid #e2e2e2; image-rendering: pixelated;
+               width: 512px; height: 256px; max-width: 100%; height: auto; margin: 0 auto 10px; }
+  .card dl { display: grid; grid-template-columns: 84px 1fr; gap: 2px 10px; margin: 0; font-size: 13px; }
+  .card dt { color: #555; }
+  .card dd { margin: 0; }
+  .absent { border-left: 3px solid #b00; padding: 2px 0 2px 14px; }
+  .absent li { margin: 6px 0; }
+  .mergeimg { display: block; width: 100%; max-width: 1728px; height: auto; margin: 0 auto 10px;
+              image-rendering: pixelated; }
+  .merge figcaption { font-size: 13px; color: #555; margin: 0 0 4px; }
+  @media print { .card { break-inside: avoid; } body { padding: 0; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>LightSense OLED 页面草图</h1>
+  <p class="sub">SSD1309 1.54″ 128×64 单色屏 · 依据 <code>src/oled.cpp</code> 当前源码逐支复刻 · 4× 整数放大（512×256，最近邻）</p>
+
+  <div class="meta">
+    <ul>
+      <li><b>像素几何</b>：1:1 按 u8g2 坐标绘制，白底黑像素（黑=点亮），无阴影/渐变/装饰；4× 仅做最近邻放大。</li>
+      <li><b>字体</b>：直接解码固件同款 U8g2 点阵字库 <code>u8g2_font_wqy12_t_gb2312</code>（12px 正文）与 <code>u8g2_font_wqy16_t_gb2312</code>（16px 判定），字形与字宽均非 TTF 近似。</li>
+      <li><b>字模模式</b>：u8g2 默认 solid（<code>is_transparent=0</code>），字形背景像素会以反色写入，可能擦除其后的线条；本组图如实复现。</li>
+      <li><b>动态数值</b>：指标、房间号、计数等为代表性样例；页面结构、字符串格式、坐标均来自源码。长文本经 <code>fitUTF8()</code> 截尾。</li>
+      <li><b>交付范围</b>：当前源码只有 3 个页面分支（<code>drawAll()</code> 的 switch，oled.cpp:324-329），共 17 张状态图；另附 3×2 合并图（取 01/03/05/07/10/14，供专利交底书使用）与 3 版开机 Logo 设计稿（未实现）。代码中不存在的页面不补画，清单见下文。</li>
+    </ul>
+  </div>
+
+  <h2>页面清单</h2>
+  <table>
+    <thead><tr><th>编号</th><th>页面</th><th>状态</th><th>源码位置</th><th>函数</th></tr></thead>
+    <tbody>
+      <tr><td><a href="#01">01</a></td><td>频闪仪（页 0）</td><td>合规 PASS（默认态）</td><td><code>src/oled.cpp:103-134</code></td><td>drawMeterPage()</td></tr><tr><td><a href="#02">02</a></td><td>频闪仪（页 0）</td><td>双超标（判定文案与框宽变化）</td><td><code>src/oled.cpp:103-134</code></td><td>drawMeterPage()</td></tr><tr><td><a href="#03">03</a></td><td>LED（页 1）</td><td>当前输出=常灭，光标=常灭</td><td><code>src/oled.cpp:138-164</code></td><td>drawLedPage()</td></tr><tr><td><a href="#04">04</a></td><td>LED（页 1）</td><td>光标=5 kHz，当前输出=1 kHz</td><td><code>src/oled.cpp:138-164</code></td><td>drawLedPage()</td></tr><tr><td><a href="#05">05</a></td><td>教室（页 2）</td><td>第 1 步 · 巡检选中，有上次记录</td><td><code>src/oled.cpp:224-259</code></td><td>drawClassroomPage()</td></tr><tr><td><a href="#06">06</a></td><td>教室（页 2）</td><td>第 1 步 · 普通测量选中，无记录</td><td><code>src/oled.cpp:224-259</code></td><td>drawClassroomPage()</td></tr><tr><td><a href="#07">07</a></td><td>教室（页 2）</td><td>第 2 步 · 30s 选中</td><td><code>src/oled.cpp:297-316</code></td><td>drawClassroomPage()</td></tr><tr><td><a href="#08">08</a></td><td>教室（页 2）</td><td>第 2 步 · 1min 选中</td><td><code>src/oled.cpp:297-316</code></td><td>drawClassroomPage()</td></tr><tr><td><a href="#09">09</a></td><td>教室（页 2）</td><td>第 2 步 · 10min 选中</td><td><code>src/oled.cpp:297-316</code></td><td>drawClassroomPage()</td></tr><tr><td><a href="#10">10</a></td><td>教室（页 2）</td><td>第 3 步 · 巡检确认（Z002，30s）</td><td><code>src/oled.cpp:261-295</code></td><td>drawClassroomPage()</td></tr><tr><td><a href="#11">11</a></td><td>教室（页 2）</td><td>第 3 步 · 普通测量确认（30s）</td><td><code>src/oled.cpp:261-295</code></td><td>drawClassroomPage()</td></tr><tr><td><a href="#12">12</a></td><td>教室（页 2）</td><td>巡检进行中 · 空闲（Z001 2/5，下一点 RF 右前）</td><td><code>src/oled.cpp:196-214</code></td><td>drawClassroomPage() → inspection idle 分支</td></tr><tr><td><a href="#13">13</a></td><td>教室（页 2）</td><td>巡检 5 点已测完（Z001 5/5）</td><td><code>src/oled.cpp:196-214</code></td><td>drawClassroomPage() → inspection idle 分支</td></tr><tr><td><a href="#14">14</a></td><td>教室（页 2）</td><td>测量进行中（巡检 Z001-C，12/29，剩余 17s）</td><td><code>src/oled.cpp:172-193</code></td><td>drawClassroomPage() → running 分支</td></tr><tr><td><a href="#15">15</a></td><td>教室（页 2）</td><td>测量进行中（巡检 Z001-C，125/586，剩余 7:52）</td><td><code>src/oled.cpp:172-193</code></td><td>drawClassroomPage() → running 分支</td></tr><tr><td><a href="#16">16</a></td><td>教室（页 2）</td><td>普通测量进行中（灯具 1，9/29）</td><td><code>src/oled.cpp:172-193</code></td><td>drawClassroomPage() → running 分支</td></tr><tr><td><a href="#17">17</a></td><td>全局临时提示条（覆盖任一页）</td><td>记录已满提示（叠在第 2 步背景上）</td><td><code>src/oled.cpp:36-41, 331-336</code></td><td>oledMsg() + drawAll()</td></tr>
+    </tbody>
+  </table>
+
+  <h2>逐页草图</h2>
+  <div class="grid">
+    
+      <figure class="card" id="01">
+        <figcaption><span class="num">01</span> 频闪仪（页 0） · 合规 PASS（默认态）</figcaption>
+        <img src="01_meter_pass.png" width="512" height="256" alt="频闪仪（页 0） 合规 PASS（默认态）">
+        <dl>
+          <dt>触发条件</dt><dd>上电默认 s_page=0；左右键循环切页。本页上下/OK 无动作（OK 仅触发一次重绘）</dd>
+          <dt>函数</dt><dd><code>drawMeterPage()</code></dd>
+          <dt>源码</dt><dd><a href="../../src/oled.cpp"><code>src/oled.cpp:103-134</code></a></dd>
+          <dt>关键元素</dt><dd>三页签；16px 判定文本（ZONE_OLED[zone]）+ 按文本宽自适应的判定框；6 项指标两列</dd>
+          <dt>本图取值</dt><dd>zone=0 → “合规 PASS”；示例快照 m 8.3% / Fq 100.0Hz / Pst 0.4 / SVM 0.12 / ADC 1200 / FI 0.05</dd>
+          <dt>备注</dt><dd>判定框宽 = 文本宽 + 16，上限 124；bx=(128-bw)/2，避免画满 128 列造成面板包绕（oled.cpp:110-116）</dd>
+        </dl>
+      </figure>
+      <figure class="card" id="02">
+        <figcaption><span class="num">02</span> 频闪仪（页 0） · 双超标（判定文案与框宽变化）</figcaption>
+        <img src="02_meter_dual_fail.png" width="512" height="256" alt="频闪仪（页 0） 双超标（判定文案与框宽变化）">
+        <dl>
+          <dt>触发条件</dt><dd>同页 0，由 snap-&gt;zone=3 切换判定文案；无独立结果页</dd>
+          <dt>函数</dt><dd><code>drawMeterPage()</code></dd>
+          <dt>源码</dt><dd><a href="../../src/oled.cpp"><code>src/oled.cpp:103-134</code></a></dd>
+          <dt>关键元素</dt><dd>16px “双超标” + 框宽 64（文本 48+16）；指标值随快照变化</dd>
+          <dt>本图取值</dt><dd>zone=3 → “双超标”；m 42.7% / Fq 120.0Hz / Pst 1.4 / SVM 0.58 / ADC 980 / FI 0.31</dd>
+          <dt>备注</dt><dd>同一页面只换数据与判定文案，布局不变；Pst 按 %.1f 输出，1.35 显示为 1.4</dd>
+        </dl>
+      </figure>
+      <figure class="card" id="03">
+        <figcaption><span class="num">03</span> LED（页 1） · 当前输出=常灭，光标=常灭</figcaption>
+        <img src="03_led_default.png" width="512" height="256" alt="LED（页 1） 当前输出=常灭，光标=常灭">
+        <dl>
+          <dt>触发条件</dt><dd>页 0 右键 / 页 2 左键进入；进入后 s_ledSel 保留上次光标</dd>
+          <dt>函数</dt><dd><code>drawLedPage()</code></dd>
+          <dt>源码</dt><dd><a href="../../src/oled.cpp"><code>src/oled.cpp:138-164</code></a></dd>
+          <dt>关键元素</dt><dd>7 模式两列网格（列优先：左列 0–3，右列 4–6）；反白=当前实际输出；&gt; = 预选光标；上下键在 7 模式循环；OK 应用</dd>
+          <dt>本图取值</dt><dd>ledPwmGetMode()=0 → “常灭”反白；s_ledSel=0 → “&gt;”在常灭左侧（x=2）</dd>
+          <dt>备注</dt><dd>模式名来自 led_pwm.cpp MODES 表（L14-L21），与网页 /led 参数同源</dd>
+        </dl>
+      </figure>
+      <figure class="card" id="04">
+        <figcaption><span class="num">04</span> LED（页 1） · 光标=5 kHz，当前输出=1 kHz</figcaption>
+        <img src="04_led_cursor_5khz_current_1khz.png" width="512" height="256" alt="LED（页 1） 光标=5 kHz，当前输出=1 kHz">
+        <dl>
+          <dt>触发条件</dt><dd>上下键移动 s_ledSel，OK 前不改变输出；本例 s_ledSel=6、当前模式=5</dd>
+          <dt>函数</dt><dd><code>drawLedPage()</code></dd>
+          <dt>源码</dt><dd><a href="../../src/oled.cpp"><code>src/oled.cpp:138-164</code></a></dd>
+          <dt>关键元素</dt><dd>反白块只跟随当前输出（1 kHz），&gt; 光标独立停在 5 kHz</dd>
+          <dt>本图取值</dt><dd>cur=5 → “1 kHz”反白；s_ledSel=6 → “&gt;”在 5 kHz 左侧（x=64）</dd>
+          <dt>备注</dt><dd>确认后光标与反白重合；两列 x=12/74，行距 12，首行基线 y=25</dd>
+        </dl>
+      </figure>
+      <figure class="card" id="05">
+        <figcaption><span class="num">05</span> 教室（页 2） · 第 1 步 · 巡检选中，有上次记录</figcaption>
+        <img src="05_classroom_step1_inspect.png" width="512" height="256" alt="教室（页 2） 第 1 步 · 巡检选中，有上次记录">
+        <dl>
+          <dt>触发条件</dt><dd>左/右键进入页 2 时 s_clsStage=0；上下键切换 s_clsMode；OK → 第 2 步</dd>
+          <dt>函数</dt><dd><code>drawClassroomPage()</code></dd>
+          <dt>源码</dt><dd><a href="../../src/oled.cpp"><code>src/oled.cpp:224-259</code></a></dd>
+          <dt>关键元素</dt><dd>模式项“巡检Z002”（巡检 + 下一个自动编号预览）与“普通测量”；“上次 Z001:A 合规”；底行操作提示</dd>
+          <dt>本图取值</dt><dd>nextAutoNo=2 → Z002；已完成记录 Z001、verdict=1 → “A 合规”</dd>
+          <dt>备注</dt><dd>“上次…”行经 fitUTF8(buf,124) 截尾；本例 96px 不触发</dd>
+        </dl>
+      </figure>
+      <figure class="card" id="06">
+        <figcaption><span class="num">06</span> 教室（页 2） · 第 1 步 · 普通测量选中，无记录</figcaption>
+        <img src="06_classroom_step1_normal_no_history.png" width="512" height="256" alt="教室（页 2） 第 1 步 · 普通测量选中，无记录">
+        <dl>
+          <dt>触发条件</dt><dd>第 1 步上下键切到 s_clsMode=1；无已完成巡检任务</dd>
+          <dt>函数</dt><dd><code>drawClassroomPage()</code></dd>
+          <dt>源码</dt><dd><a href="../../src/oled.cpp"><code>src/oled.cpp:224-259</code></a></dd>
+          <dt>关键元素</dt><dd>“普通测量”反白框 x76–127 贴右缘；“暂无巡检记录”</dd>
+          <dt>本图取值</dt><dd>无 status=DONE 的任务 → last=NULL；普通测量文本 48px，框宽 52</dd>
+          <dt>备注</dt><dd>右缘贴边是代码坐标结果（xm[1]=78），未做避让</dd>
+        </dl>
+      </figure>
+      <figure class="card" id="07">
+        <figcaption><span class="num">07</span> 教室（页 2） · 第 2 步 · 30s 选中</figcaption>
+        <img src="07_classroom_step2_30s.png" width="512" height="256" alt="教室（页 2） 第 2 步 · 30s 选中">
+        <dl>
+          <dt>触发条件</dt><dd>第 1 步按 OK → s_clsStage=1；上下键循环三档；OK → 第 3 步</dd>
+          <dt>函数</dt><dd><code>drawClassroomPage()</code></dd>
+          <dt>源码</dt><dd><a href="../../src/oled.cpp"><code>src/oled.cpp:297-316</code></a></dd>
+          <dt>关键元素</dt><dd>“测量时长:” + 三档选项（30s/1min/10min），反白当前档；底行提示</dd>
+          <dt>本图取值</dt><dd>s_durSel=0 → 30s 反白（x2–23）</dd>
+          <dt>备注</dt><dd>三档 x=4/46/94，框高 12、基线 44；底行提示会被临时消息条覆盖</dd>
+        </dl>
+      </figure>
+      <figure class="card" id="08">
+        <figcaption><span class="num">08</span> 教室（页 2） · 第 2 步 · 1min 选中</figcaption>
+        <img src="08_classroom_step2_1min.png" width="512" height="256" alt="教室（页 2） 第 2 步 · 1min 选中">
+        <dl>
+          <dt>触发条件</dt><dd>上下键循环 s_durSel=1</dd>
+          <dt>函数</dt><dd><code>drawClassroomPage()</code></dd>
+          <dt>源码</dt><dd><a href="../../src/oled.cpp"><code>src/oled.cpp:297-316</code></a></dd>
+          <dt>关键元素</dt><dd>1min 反白框 x44–71；另两档正常显示</dd>
+          <dt>本图取值</dt><dd>DUR_NAMES[1]=&quot;1min&quot;；窗口数 CLS_WINDOWS_1MIN</dd>
+          <dt>备注</dt><dd>三档窗口数见 DUR_WINDOWS（oled.cpp:44），与网页三档一致</dd>
+        </dl>
+      </figure>
+      <figure class="card" id="09">
+        <figcaption><span class="num">09</span> 教室（页 2） · 第 2 步 · 10min 选中</figcaption>
+        <img src="09_classroom_step2_10min.png" width="512" height="256" alt="教室（页 2） 第 2 步 · 10min 选中">
+        <dl>
+          <dt>触发条件</dt><dd>上下键循环 s_durSel=2</dd>
+          <dt>函数</dt><dd><code>drawClassroomPage()</code></dd>
+          <dt>源码</dt><dd><a href="../../src/oled.cpp"><code>src/oled.cpp:297-316</code></a></dd>
+          <dt>关键元素</dt><dd>10min 反白框 x92–125；右侧留 2px</dd>
+          <dt>本图取值</dt><dd>DUR_NAMES[2]=&quot;10min&quot;；窗口数 CLS_WINDOWS_10MIN</dd>
+          <dt>备注</dt><dd>框 + 文本总宽 34px，未越过 127 列</dd>
+        </dl>
+      </figure>
+      <figure class="card" id="10">
+        <figcaption><span class="num">10</span> 教室（页 2） · 第 3 步 · 巡检确认（Z002，30s）</figcaption>
+        <img src="10_classroom_step3_inspect.png" width="512" height="256" alt="教室（页 2） 第 3 步 · 巡检确认（Z002，30s）">
+        <dl>
+          <dt>触发条件</dt><dd>第 2 步按 OK → s_clsStage=2；上下键返回第 2 步；OK 建立自动编号任务并从 C 点开测</dd>
+          <dt>函数</dt><dd><code>drawClassroomPage()</code></dd>
+          <dt>源码</dt><dd><a href="../../src/oled.cpp"><code>src/oled.cpp:261-295</code></a></dd>
+          <dt>关键元素</dt><dd>标题“巡检 Z002  30s”；教室轮廓 80×21（x24–103,y28–48）；5 个测点圆点；LF/RF/LB/RB；中心 C 反白块 x67–78；底行“OK:测C点 上下:返回”</dd>
+          <dt>本图取值</dt><dd>s_clsMode=0、nextAutoNo=2、s_durSel=0</dd>
+          <dt>备注</dt><dd>C 反白块后画，覆盖 RF 首列；C 文本基线 43，圆点半径 2（drawDisc）</dd>
+        </dl>
+      </figure>
+      <figure class="card" id="11">
+        <figcaption><span class="num">11</span> 教室（页 2） · 第 3 步 · 普通测量确认（30s）</figcaption>
+        <img src="11_classroom_step3_normal.png" width="512" height="256" alt="教室（页 2） 第 3 步 · 普通测量确认（30s）">
+        <dl>
+          <dt>触发条件</dt><dd>s_clsMode=1 时第 3 步；OK → classroomStart(NULL,…)，灯具自动编号</dd>
+          <dt>函数</dt><dd><code>drawClassroomPage()</code></dd>
+          <dt>源码</dt><dd><a href="../../src/oled.cpp"><code>src/oled.cpp:261-295</code></a></dd>
+          <dt>关键元素</dt><dd>标题“普通测量  30s”；中部“灯具自动编号”；底行“OK:开始 上下:返回”</dd>
+          <dt>本图取值</dt><dd>s_clsMode=1、s_durSel=0</dd>
+          <dt>备注</dt><dd>不显示教室点位图（仅巡检模式绘制）</dd>
+        </dl>
+      </figure>
+      <figure class="card" id="12">
+        <figcaption><span class="num">12</span> 教室（页 2） · 巡检进行中 · 空闲（Z001 2/5，下一点 RF 右前）</figcaption>
+        <img src="12_classroom_inspect_idle_2of5.png" width="512" height="256" alt="教室（页 2） 巡检进行中 · 空闲（Z001 2/5，下一点 RF 右前）">
+        <dl>
+          <dt>触发条件</dt><dd>巡检任务已建立且 classroomIsRunning()=false；上下键仍可改时长；OK 测下一点，5 点齐全则结束</dd>
+          <dt>函数</dt><dd><code>drawClassroomPage() → inspection idle 分支</code></dd>
+          <dt>源码</dt><dd><a href="../../src/oled.cpp"><code>src/oled.cpp:196-214</code></a></dd>
+          <dt>关键元素</dt><dd>“教室 Z001  2/5”；“待测 RF 右前”；“OK:测此点 30s”</dd>
+          <dt>本图取值</dt><dd>pointsCount=2 → 下一点 RF（顺序 C→LF→RF→LB→RB）；s_durSel=0</dd>
+          <dt>备注</dt><dd>教室号过长时 fitUTF8 截尾，避免右缘包绕</dd>
+        </dl>
+      </figure>
+      <figure class="card" id="13">
+        <figcaption><span class="num">13</span> 教室（页 2） · 巡检 5 点已测完（Z001 5/5）</figcaption>
+        <img src="13_classroom_inspect_idle_done.png" width="512" height="256" alt="教室（页 2） 巡检 5 点已测完（Z001 5/5）">
+        <dl>
+          <dt>触发条件</dt><dd>classroomInspectNextPoint()=0 且任务仍 active；OK → classroomInspectFinish()</dd>
+          <dt>函数</dt><dd><code>drawClassroomPage() → inspection idle 分支</code></dd>
+          <dt>源码</dt><dd><a href="../../src/oled.cpp"><code>src/oled.cpp:196-214</code></a></dd>
+          <dt>关键元素</dt><dd>“教室 Z001  5/5”；“5 点已测完”；“OK:结束巡检”</dd>
+          <dt>本图取值</dt><dd>pointsCount=5、next=0</dd>
+          <dt>备注</dt><dd>结束后无独立结果页，回到第 1 步菜单；汇总结果在网页端查看</dd>
+        </dl>
+      </figure>
+      <figure class="card" id="14">
+        <figcaption><span class="num">14</span> 教室（页 2） · 测量进行中（巡检 Z001-C，12/29，剩余 17s）</figcaption>
+        <img src="14_classroom_running_30s.png" width="512" height="256" alt="教室（页 2） 测量进行中（巡检 Z001-C，12/29，剩余 17s）">
+        <dl>
+          <dt>触发条件</dt><dd>OK 启动后 classroomIsRunning()=true；运行中 OK 忽略，左右仍可切页看实时值</dd>
+          <dt>函数</dt><dd><code>drawClassroomPage() → running 分支</code></dd>
+          <dt>源码</dt><dd><a href="../../src/oled.cpp"><code>src/oled.cpp:172-193</code></a></dd>
+          <dt>关键元素</dt><dd>“教室测量中”；标签“Z001-C”；进度框 120×8（y46–53）；填充=done*120/target；“12/29  剩余 17s”</dd>
+          <dt>本图取值</dt><dd>done=12、target=29（30s 档）；fill=49px；remS=(29-12)*1024/1000=17</dd>
+          <dt>备注</dt><dd>底行基线 62，CJK 字顶行落在 y52–53，与进度框底边重叠；按代码如实复现</dd>
+        </dl>
+      </figure>
+      <figure class="card" id="15">
+        <figcaption><span class="num">15</span> 教室（页 2） · 测量进行中（巡检 Z001-C，125/586，剩余 7:52）</figcaption>
+        <img src="15_classroom_running_10min.png" width="512" height="256" alt="教室（页 2） 测量进行中（巡检 Z001-C，125/586，剩余 7:52）">
+        <dl>
+          <dt>触发条件</dt><dd>10min 档启动后的运行态</dd>
+          <dt>函数</dt><dd><code>drawClassroomPage() → running 分支</code></dd>
+          <dt>源码</dt><dd><a href="../../src/oled.cpp"><code>src/oled.cpp:172-193</code></a></dd>
+          <dt>关键元素</dt><dd>同一运行页；剩余 ≥60s 时格式化为 m:ss</dd>
+          <dt>本图取值</dt><dd>done=125、target=586；fill=25px；remS=(586-125)*1024/1000=472 → 7:52</dd>
+          <dt>备注</dt><dd>底部文字 104px，未越过右缘</dd>
+        </dl>
+      </figure>
+      <figure class="card" id="16">
+        <figcaption><span class="num">16</span> 教室（页 2） · 普通测量进行中（灯具 1，9/29）</figcaption>
+        <img src="16_classroom_running_normal_lamp1.png" width="512" height="256" alt="教室（页 2） 普通测量进行中（灯具 1，9/29）">
+        <dl>
+          <dt>触发条件</dt><dd>第 3 步普通测量 OK → classroomStart(NULL,…)，标签自动命名“灯具 N”</dd>
+          <dt>函数</dt><dd><code>drawClassroomPage() → running 分支</code></dd>
+          <dt>源码</dt><dd><a href="../../src/oled.cpp"><code>src/oled.cpp:172-193</code></a></dd>
+          <dt>关键元素</dt><dd>“教室测量中”；标签“灯具 1”；进度 9/29；剩余 20s</dd>
+          <dt>本图取值</dt><dd>classroomStart(NULL) → “灯具 1”；done=9、target=29</dd>
+          <dt>备注</dt><dd>普通测量没有独立页面，复用教室页运行态（oled.cpp:410）</dd>
+        </dl>
+      </figure>
+      <figure class="card" id="17">
+        <figcaption><span class="num">17</span> 全局临时提示条（覆盖任一页） · 记录已满提示（叠在第 2 步背景上）</figcaption>
+        <img src="17_msg_bar_records_full.png" width="512" height="256" alt="全局临时提示条（覆盖任一页） 记录已满提示（叠在第 2 步背景上）">
+        <dl>
+          <dt>触发条件</dt><dd>创建巡检失败 → “任务/记录已满”（L408）；普通测量失败 → “记录已满, 请先清空”（L416）；显示 3 秒（L40）</dd>
+          <dt>函数</dt><dd><code>oledMsg() + drawAll()</code></dd>
+          <dt>源码</dt><dd><a href="../../src/oled.cpp"><code>src/oled.cpp:36-41, 331-336</code></a></dd>
+          <dt>关键元素</dt><dd>反白条 0,52,128,12；文字基线 62，x=4；覆盖当前页底行</dd>
+          <dt>本图取值</dt><dd>s_msg=&quot;记录已满, 请先清空&quot;，宽 108px</dd>
+          <dt>备注</dt><dd>全页唯一底部反白提示条；不是低电量条（固件当前无电池模块）</dd>
+        </dl>
+      </figure>
+  </div>
+
+  <h2>合并图（3×2 六页对照）</h2>
+  <p class="sub">用于并入专利交底书的单页视图：选取 01 / 03 / 05 / 07 / 10 / 14 六张草图，按 3 列 × 2 行、阅读序（左→右、上→下）拼接，每张图下方统一标注原编号。</p>
+  <figure class="merge">
+    <img class="mergeimg" src="oled-merge-01-03-05-07-10-14.png" width="1728" height="694"
+         alt="LightSense OLED 六页草图 3×2 合并图：01 频闪仪、03 LED、05 教室第1步、07 教室第2步、10 教室第3步、14 教室运行中">
+    <figcaption><code>oled-merge-01-03-05-07-10-14.png</code> · 1728×694 px · 单色 L · 白底 · 六张按 1:1 整数像素直接粘贴，未缩放、未重采样（网页内按容器宽度缩放显示，文件本身为原像素）。</figcaption>
+  </figure>
+  <table>
+    <thead><tr><th>编号</th><th>页面 / 状态</th><th>源文件</th><th>落位左上角 (x, y)</th><th>占位</th></tr></thead>
+    <tbody>
+      <tr><td>01</td><td>频闪仪 · 合规 PASS</td><td><code>01_meter_pass.png</code></td><td>(48, 48)</td><td>512×256</td></tr>
+      <tr><td>03</td><td>LED · 常灭</td><td><code>03_led_default.png</code></td><td>(608, 48)</td><td>512×256</td></tr>
+      <tr><td>05</td><td>教室 · 第 1 步 巡检</td><td><code>05_classroom_step1_inspect.png</code></td><td>(1168, 48)</td><td>512×256</td></tr>
+      <tr><td>07</td><td>教室 · 第 2 步 30s</td><td><code>07_classroom_step2_30s.png</code></td><td>(48, 352)</td><td>512×256</td></tr>
+      <tr><td>10</td><td>教室 · 第 3 步 巡检</td><td><code>10_classroom_step3_inspect.png</code></td><td>(608, 352)</td><td>512×256</td></tr>
+      <tr><td>14</td><td>教室 · 运行中 30s</td><td><code>14_classroom_running_30s.png</code></td><td>(1168, 352)</td><td>512×256</td></tr>
+    </tbody>
+  </table>
+  <div class="meta">
+    <ul>
+      <li><b>排版参数</b>：画布 1728×694；四周留白 48；图与图横向、纵向间距均为 48（列 x=48 / 608 / 1168，行 y=48 / 352）。</li>
+      <li><b>标注</b>：统一置于图下方，字号 20（微软雅黑），距图底 12 px，水平居中，颜色纯黑、无描边无阴影；六张标注基线一致。</li>
+      <li><b>校验</b>：生成后从合并图按落位坐标裁回六张，与原始 PNG 逐像素比对，全部一致（无缩放/重采样）；原始六张 PNG 未改动。</li>
+    </ul>
+  </div>
+
+  <h2>开机 Logo 设计稿（3 版候选）</h2>
+  <p class="sub">仅设计稿，未改动固件代码；128×64 逐像素绘制 + 4× 最近邻（512×256），字形取自固件同款 U8g2 字库。完整时序、Flash 与耗时说明见 <a href="boot-logo.md"><code>boot-logo.md</code></a>。</p>
+  <div class="grid">
+    <figure class="card" id="boot-a">
+      <figcaption><span class="num">A</span> 环形光感 · 英文横排（推荐）</figcaption>
+      <img src="boot_logo_A_ring_en.png" width="512" height="256" alt="开机 Logo A 版：圆环 + 频闪折线 + LightSense + FLICKER METER v1.7">
+      <dl>
+        <dt>元素</dt><dd>顶部光点、圆环 r=10、环内频闪折线、左右光条；品牌 <code>LightSense</code>；品类版本 <code>FLICKER METER v1.7</code></dd>
+        <dt>字体</dt><dd><code>helvB14_tf</code>（14px 比例） + <code>6x13_tf</code>（6×13 半等宽）</dd>
+        <dt>坐标</dt><dd>环 (64,16)；品牌 x13 y44（宽 102）；副标 x10 y59（宽 108）；墨迹 x10–116 / y2–59</dd>
+        <dt>Flash</dt><dd>+5,842 B（≈5.7 KiB）；无堆分配</dd>
+        <dt>耗时</dt><dd>CPU 0.1–0.3 ms，占全屏刷新（40–80 ms）约 0.5%</dd>
+        <dt>风险</dt><dd>6×13 副标偏细；需确认分区余量</dd>
+      </dl>
+    </figure>
+    <figure class="card" id="boot-b">
+      <figcaption><span class="num">B</span> 中英混排（零新增字库）</figcaption>
+      <img src="boot_logo_B_bilingual.png" width="512" height="256" alt="开机 Logo B 版：小圆环 + 光感 + LightSense + 照明频闪检测 v1.7">
+      <dl>
+        <dt>元素</dt><dd>小圆环 r=7 + 折线；中文主标 <code>光感</code> 与英文 <code>LightSense</code> 同基线；副标 <code>照明频闪检测 · v1.7</code></dd>
+        <dt>字体</dt><dd>复用现有 <code>wqy16_t_gb2312</code> / <code>wqy12_t_gb2312</code>（GB2312 全集）</dd>
+        <dt>坐标</dt><dd>环 (64,10)；主标 x17 y38（宽 32）+ 英文 x57 y38（宽 54）；副标 x10 y58（宽 107）</dd>
+        <dt>Flash</dt><dd><b>+0 B</b>（两档字库本就已链接）；无堆分配</dd>
+        <dt>耗时</dt><dd>同 A 版量级</dd>
+        <dt>风险</dt><dd>12 px 中文偏小；信息密度最高</dd>
+      </dl>
+    </figure>
+    <figure class="card" id="boot-c">
+      <figcaption><span class="num">C</span> 图形主导</figcaption>
+      <img src="boot_logo_C_mark_dominant.png" width="512" height="256" alt="开机 Logo C 版：大圆环 + 频闪折线 + LightSense">
+      <dl>
+        <dt>元素</dt><dd>顶部光点、大圆环 r=16、环内折线、左右光条；仅品牌 <code>LightSense</code></dd>
+        <dt>字体</dt><dd><code>logisoso16_tf</code>（16px 几何无衬线）</dd>
+        <dt>坐标</dt><dd>环 (64,19)；品牌 x18 y57（宽 92）；墨迹 x19–108 / y1–60</dd>
+        <dt>Flash</dt><dd>+3,048 B（≈3.0 KiB）；无堆分配</dd>
+        <dt>耗时</dt><dd>CPU 0.1–0.3 ms（图元约 400 px）</dd>
+        <dt>风险</dt><dd>无品类/版本文字；环顶 y=1 贴近边缘</dd>
+      </dl>
+    </figure>
+  </div>
+  <table>
+    <thead><tr><th>版本</th><th>画面元素</th><th>新增字体</th><th>Flash 增量</th><th>结论</th></tr></thead>
+    <tbody>
+      <tr><td>A（推荐）</td><td>图形 + 品牌 + 品类 + 版本</td><td>helvB14_tf + 6x13_tf</td><td>5,842 B</td><td>信息最完整，成本可控，纯英数不依赖 CJK 字库</td></tr>
+      <tr><td>B</td><td>图形（小）+ 中英双标 + 副标</td><td>无</td><td>0 B</td><td>Flash 敏感时首选；中文 12px 偏小</td></tr>
+      <tr><td>C</td><td>图形（大）+ 品牌</td><td>logisoso16_tf</td><td>3,048 B</td><td>适合放大图/宣传，屏上信息最少</td></tr>
+    </tbody>
+  </table>
+  <div class="meta">
+    <ul>
+      <li><b>首帧时序</b>：<code>oledBegin()</code> 绘 logo 并整帧发送 → 约 50–110 ms 可见；首个报告窗口（≈1.024 s）的 <code>oledShow()</code> 覆盖，实际可见约 0.9–1.0 s；其间按键会立即重绘。</li>
+      <li><b>兜底</b>：按键若发生在开机 800 ms 内，只更新状态不重绘（不阻塞主循环），首个报告窗口自然接管。</li>
+      <li><b>未修改固件代码</b>：<code>src/</code> 全部保持原样，本组图仅为设计稿。</li>
+    </ul>
+  </div>
+
+  <h2>教室巡检结果页 设计稿（3 版候选）</h2>
+  <p class="sub">仅设计稿，未改动固件代码；128×64 逐像素绘制 + 4× 最近邻（512×256），字形取自固件同款 U8g2 字库。字段可得性、交互时序与落地成本见 <a href="inspect-result.md"><code>inspect-result.md</code></a>。</p>
+  <div class="grid">
+    <figure class="card" id="inspect-a">
+      <figcaption><span class="num">A</span> 单屏：结论徽章 + 5 点结果格（推荐）</figcaption>
+      <img src="inspect_result_A_summary_grid.png" width="512" height="256" alt="巡检结果 A 版：结论反白条 + 5 个点位结果格">
+      <dl>
+        <dt>优先级</dt><dd>汇总结论 &gt; 完成度 &gt; 每点判定</dd>
+        <dt>元素</dt><dd>标题 + 教室号 <code>Z001 5/5</code>；结论反白条；C/LF/RF/LB/RB 五个 23×26 结果格（点位码 + 单字判定）</dd>
+        <dt>字体</dt><dd><code>wqy12_t_gb2312</code> + <code>wqy16_t_gb2312</code></dd>
+        <dt>坐标</dt><dd>结论条 (4,14,120×20) 文字基线 29；格子 x=3+25i，y=37；点位码基线 49、判定基线 61；右缘 126</dd>
+        <dt>成本</dt><dd><b>+0 B 字体</b>；代码约 250–500 B；堆 0</dd>
+        <dt>风险</dt><dd>单字判定需要一次图例说明（合/超/双/暗/亮）</dd>
+      </dl>
+    </figure>
+    <figure class="card" id="inspect-b">
+      <figcaption><span class="num">B</span> 结论主导 + 三行摘要</figcaption>
+      <img src="inspect_result_B_verdict_focus.png" width="512" height="256" alt="巡检结果 B 版：A/B/C 大字徽章 + 局部风险 + 计数 + 最差点">
+      <dl>
+        <dt>优先级</dt><dd>结论 &gt; 统计 &gt; 最差点</dd>
+        <dt>元素</dt><dd>30×30 反白徽章内 A/B/C 大字；<code>局部风险</code>；<code>4 合规 / 1 异常</code>；<code>最差 RF 右前</code> + <code>5/5</code></dd>
+        <dt>字体</dt><dd><code>logisoso16_tf</code>（大字）+ <code>wqy16</code> + <code>wqy12</code></dd>
+        <dt>坐标</dt><dd>徽章 (5,16,30×30)，字母基线 39；结论 x42 y27；计数 x42/x82 y40；底行 y61</dd>
+        <dt>成本</dt><dd>logisoso16 若已随开机 logo 落地为 <b>+0 B</b>，否则 +3,048 B；堆 0</dd>
+        <dt>风险</dt><dd>看不到 5 点完整分布，只知最差点</dd>
+      </dl>
+    </figure>
+    <figure class="card" id="inspect-c1">
+      <figcaption><span class="num">C1</span> 两屏分页 · 第 1 屏（汇总）</figcaption>
+      <img src="inspect_result_C_p1_summary.png" width="512" height="256" alt="巡检结果 C 版第 1 屏：结论 + 5 个状态格 + 计数">
+      <dl>
+        <dt>优先级</dt><dd>结论 &gt; 点位分布 &gt; 计数</dd>
+        <dt>元素</dt><dd>结论条；5 个 23×17 状态格（异常格反白）；<code>4 合规 1 异常</code> + <code>明细&gt;</code></dd>
+        <dt>字体</dt><dd><code>wqy12</code> + <code>wqy16</code></dd>
+        <dt>坐标</dt><dd>结论条 (4,14,120×20)；格子 x=3+25i，y=36；底行基线 62</dd>
+        <dt>成本</dt><dd>+0 B 字体；两屏合计代码约 400–700 B；状态 ~8 B RAM；堆 0</dd>
+        <dt>风险</dt><dd>需翻页交互与按键语义，改动面比 A/B 大</dd>
+      </dl>
+    </figure>
+    <figure class="card" id="inspect-c2">
+      <figcaption><span class="num">C2</span> 两屏分页 · 第 2 屏（逐点明细）</figcaption>
+      <img src="inspect_result_C_p2_points.png" width="512" height="256" alt="巡检结果 C 版第 2 屏：5 行逐点明细">
+      <dl>
+        <dt>优先级</dt><dd>逐点判定与 Pst 值</dd>
+        <dt>元素</dt><dd>5 行：点位码 / 中文点名 / 判定（合·P超·S超·双超·暗·亮）/ Pst</dd>
+        <dt>字体</dt><dd><code>wqy12</code>（12 px）</dd>
+        <dt>坐标</dt><dd>列 x=2 / 20 / 48 / 76；行基线 12/24/36/48/60；最右墨迹 118</dd>
+        <dt>成本</dt><dd>+0 B 字体；无新增存储；堆 0</dd>
+        <dt>风险</dt><dd>128 px 只够 1 个指标，SVM 留在网页端</dd>
+      </dl>
+    </figure>
+  </div>
+  <table>
+    <thead><tr><th>版本</th><th>一屏可得信息</th><th>交互</th><th>字体 / Flash</th><th>结论</th></tr></thead>
+    <tbody>
+      <tr><td>A（推荐）</td><td>结论 + 完成度 + 5 点判定</td><td>无需翻页，任意键退出</td><td>0 B（wqy12/wqy16）</td><td>信息最全、改动最小、与 1.024 s 重绘天然兼容</td></tr>
+      <tr><td>B</td><td>结论 + 合规/异常计数 + 最差点</td><td>无需翻页</td><td>0 或 +3,048 B（logisoso16）</td><td>最易读，但缺失逐点分布</td></tr>
+      <tr><td>C</td><td>汇总屏 + 逐点 Pst 明细</td><td>上下键翻页</td><td>0 B</td><td>适合后续扩展，交互与状态成本最高</td></tr>
+    </tbody>
+  </table>
+  <div class="meta">
+    <ul>
+      <li><b>触发与首帧</b>：<code>oled.cpp:413</code> 的 <code>classroomInspectFinish()</code> 成功后进入结果页；同一次按键末尾的 <code>drawAll()</code>（<code>oled.cpp:444</code>）立即整帧重绘，响应 ≈0.2 s。</li>
+      <li><b>停留与退出</b>：不设超时，任意键退出（设备无历史结果入口，超时会丢失回看）；LEFT/RIGHT 退出并保留切页意图，UP/DOWN/OK 退出回教室页第 1 步 <code>s_clsStage = 0</code>。</li>
+      <li><b>报告窗口</b>：结果页是 <code>drawAll()</code> 的状态分支，1.024 s 的 <code>oledShow()</code> 每个窗口重复绘制同一状态，<b>不会被覆写</b>；不能用一次性覆盖层写法。</li>
+      <li><b>无需改调用顺序</b>：<code>classroomInspectFinish()</code> 内部会把 <code>inspCur=-1</code>，但任务仍为 DONE 且 verdict 已落盘；oled 侧在调用前记下 <code>classroomInspectTaskId()</code>（或调用后找最后一个 DONE 任务）即可，只读、不改 <code>classroom.cpp</code> 语义。</li>
+      <li><b>未修改固件代码</b>：<code>src/</code> 全部保持原样，本组图仅为设计稿。</li>
+    </ul>
+  </div>
+
+  <h2>代码中不存在的页面（未绘制）</h2>
+  <div class="absent">
+    <ul>
+      <li><b>开机 / 引导页</b>：当前固件中不存在。<code>oledBegin()</code> 只做初始化与串口打印（oled.cpp:67-75），无 splash；首帧要等首个报告窗口（main.cpp:147-155）或按键重绘（oled.cpp:424）。开机 Logo 仅有设计稿（见上一节），未落地。</li>
+      <li><b>巡检结果页</b>：不存在独立页面。第 1 步只显示“上次 room:verdict”预览（oled.cpp:246-256），5 点测完后只显示“5 点已测完 / OK:结束巡检”（L202-212）；完整结果在网页端。<b>结果页仅有设计稿</b>（见上一节 A/B/C 三版，未落地）。</li>
+      <li><b>普通测量结果页</b>：不存在。实时指标在页 0（oled.cpp:118-133），结果汇总在网页端。</li>
+      <li><b>记录列表页</b>：不存在。无列表、翻页或详情 UI。</li>
+      <li><b>设置 / WiFi 页</b>：不存在。WiFi 通过网页端 /setup 配置，OLED 无设置入口。</li>
+      <li><b>低电量提示条 / 电池图标</b>：当前源码无电池模块（v1.7 电池特性已回滚）；全页唯一的底部反白条是 <code>oledMsg()</code> 临时提示（L36-41、L331-336）。</li>
+    </ul>
+  </div>
+
+  <h2>复现说明与已知叠字</h2>
+  <div class="meta">
+    <ul>
+      <li><b>运行页底行与进度框重叠</b>：进度框 y46–53，底行基线 y62；12px CJK 字顶行落在 y52–53，solid 模式会把框底边擦出缺口。图 14–16 如实保留该 1–2px 重叠，未美化。</li>
+      <li><b>C 点反白块压住 RF</b>：第 3 步反白块 x67–78 后画，覆盖 RF 文本起点 x78 的首列。图 10 如实保留。</li>
+      <li><b>页签反白</b>：当前页页签用 <code>drawBox(x-3,0,w+6,12)</code> 反白，文字基线 y10；三页签 x 由字宽累加，非固定等宽。</li>
+      <li><b>临时提示</b>：显示 3 秒（L40），每次 <code>oledMsg()</code> 重新计时；覆盖当前页 y52–63 区域。</li>
+      <li><b>未改动固件</b>：本次仅读取源码、生成草图与索引。</li>
+    </ul>
+  </div>
+</main>
+</body>
+</html>

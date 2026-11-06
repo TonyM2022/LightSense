@@ -33,6 +33,10 @@ static uint8_t s_clsMode = 0;    // 教室页模式 (0=巡检自动编号 1=普�
 static uint32_t s_msgUntil = 0;  // 临时提示截止时刻 (记录/任务已满等, 显示 3s)
 static char s_msg[26] = "";
 
+// 巡检结果页 (5/5 结束后进入; finish 内部置 inspCur=-1, 故此处只记任务号, 只读该任务)
+static bool s_resActive = false;
+static uint16_t s_resTaskId = 0;
+
 static void oledMsg(const char *txt)   // 设置临时提示 (下次绘制显示在底行)
 {
     strncpy(s_msg, txt, sizeof(s_msg) - 1);
@@ -64,11 +68,31 @@ static void fitUTF8(char *s, uint16_t maxW)
     }
 }
 
+// ---------------- 开机 logo (C 版 图形主导; 设计稿 docs/oled-screens/boot-logo.md) ----------------
+// 单帧绘制后立即整帧发送; 复用现有 1KB u8g2 全缓冲, 无 new/无堆/无额外静态缓冲
+static void drawBootLogo(void)
+{
+    u8g2.clearBuffer();
+    u8g2.drawLine(64, 1, 64, 2);                  // 顶部光点
+    u8g2.drawCircle(64, 19, 16, U8G2_DRAW_ALL);   // 圆环 = 镜头/灯具口径
+    u8g2.drawLine(53, 21, 58, 16);                // 环内频闪波形
+    u8g2.drawLine(58, 16, 61, 19);                // 本段在 (61,19)/(61,20) 拆开,
+    u8g2.drawLine(61, 20, 63, 22);                // 复现草图的 1px 台阶 (逐像素对齐)
+    u8g2.drawLine(63, 22, 68, 17);
+    u8g2.drawLine(68, 17, 75, 20);
+    u8g2.drawLine(41, 19, 46, 19);                // 左右光条
+    u8g2.drawLine(82, 19, 87, 19);
+    u8g2.setFont(u8g2_font_logisoso16_tf);
+    u8g2.drawUTF8(18, 57, "LightSense");          // 品牌字标, 实测宽 92
+    u8g2.sendBuffer();
+}
+
 bool oledBegin(void)
 {
     // 软件模拟 I2C 无 ACK 反馈, 不做地址探测: 模块未接时位拍空总线无副作用,
     // 屏幕黑屏、主功能不受影响 (u8g2.begin 内部完成引脚方向配置与显示初始化)
     u8g2.begin();
+    drawBootLogo();                 // 首帧 logo: 首个报告窗口 (≈1.024s) 首次 oledShow() 覆盖
     s_enabled = true;
     Serial.println("OLED   : SSD1309 128x64 ready (SW I2C, 3 pages).");
     return true;
@@ -315,11 +339,87 @@ static void drawClassroomPage(void)
     u8g2.drawUTF8(4, 60, "OK:下一步 上下选时长");   // 临时提示由 drawAll 底行反白条统一覆盖
 }
 
+// ---------------- 页 4: 教室巡检结果 (A 版; 设计稿 docs/oled-screens/inspect-result.md) ----------------
+// 由 5/5 结束巡检触发; 任务号在 classroomInspectFinish() 之前记下 (finish 内部置 inspCur=-1)
+// 全屏瞬态页 (不画三页签); 全部复用 u8g2 全缓冲, 无 new/无堆/无额外缓冲
+static const char *resZoneChar(uint8_t v)   // FV_* → 12px 单字判定 (格内用)
+{
+    switch (v)
+    {
+    case FV_PASS:      return "合";
+    case FV_FAIL_PST:  return "超";
+    case FV_FAIL_SVM:  return "超";
+    case FV_FAIL_BOTH: return "双";
+    case FV_EXEMPT:    return "免";
+    case FV_DARK:      return "暗";
+    case FV_BRIGHT:    return "亮";
+    default:           return "超";        // FV_FAIL_M: 旧记录口径
+    }
+}
+
+static const ClassroomRecord *resRecord(uint16_t taskId, uint8_t pt)   // 该点位最后一次测量
+{
+    uint16_t n = 0;
+    const ClassroomRecord *rs = classroomRecords(&n);
+    for (uint16_t i = n; i > 0; i--)
+        if (rs[i - 1].taskId == taskId && rs[i - 1].pointCode == pt)
+            return &rs[i - 1];
+    return NULL;
+}
+
+static bool drawInspectResultPage(void)
+{
+    uint16_t n = 0;
+    const InspectionTask *ts = classroomTasks(&n);
+    const InspectionTask *t = NULL;
+    for (uint16_t i = 0; i < n; i++)
+        if (ts[i].id == s_resTaskId) { t = &ts[i]; break; }
+    if (!t) { s_resActive = false; return false; }   // 任务被清空 → 下一帧回普通页
+
+    char buf[32];
+    u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+    u8g2.drawUTF8(3, 10, "巡检结果");
+    snprintf(buf, sizeof(buf), "%s %u/5", t->room, (unsigned)t->pointsCount);
+    fitUTF8(buf, 122);                                // 网页可建长教室号, 防右对齐溢出
+    u8g2.drawUTF8(125 - u8g2.getUTF8Width(buf), 10, buf);
+    u8g2.drawHLine(0, 12, 128);
+
+    // 结论反白条 (与网页汇总同文案; NONE/0xFF → 未测全兜底)
+    const char *vt = "巡检未测全";
+    if (t->verdict == CLS_SUM_PASS)       vt = "A 教室合规";
+    else if (t->verdict == CLS_SUM_LOCAL) vt = "B 教室局部风险";
+    else if (t->verdict == CLS_SUM_ALL)   vt = "C 教室整体风险";
+    u8g2.drawBox(4, 14, 120, 20);
+    u8g2.setFont(u8g2_font_wqy16_t_gb2312);
+    u8g2.setDrawColor(0);
+    u8g2.drawUTF8(64 - u8g2.getUTF8Width(vt) / 2, 29, vt);   // 基线 29 = 草图实测 (文档表格误写 30)
+    u8g2.setDrawColor(1);
+
+    // 5 点结果格 (C/LF/RF/LB/RB; 无记录 / 未测点显示 "-")
+    u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+    for (uint8_t i = 0; i < CLS_PT_COUNT; i++)
+    {
+        int x = 3 + i * 25;
+        u8g2.drawFrame(x, 37, 23, 26);
+        const char *code = classroomPointCode((uint8_t)(CLS_PT_C + i));
+        u8g2.drawUTF8(x + 11 - u8g2.getUTF8Width(code) / 2, 49, code);
+        const ClassroomRecord *r = resRecord(t->id, (uint8_t)(CLS_PT_C + i));
+        const char *st = r ? resZoneChar(r->verdict) : "-";
+        u8g2.drawUTF8(x + 11 - u8g2.getUTF8Width(st) / 2, 61, st);
+    }
+    return true;
+}
+
 // ---------------- 统一绘制入口 ----------------
 // 底行临时提示 (oledMsg): 反白横条覆盖三页任一底行, 全页可见 (任务/记录已满/电量低等)
 static void drawAll(const FlickerSnapshot *snap)
 {
     u8g2.clearBuffer();
+    if (s_resActive && s_page == 2 && drawInspectResultPage())   // 结果页状态分支
+    {
+        u8g2.sendBuffer();
+        return;
+    }
     drawTabBar();
     switch (s_page)
     {
@@ -350,6 +450,18 @@ void oledShow(const FlickerSnapshot *snap)
 void oledHandleKey(uint8_t ev)
 {
     if (!s_enabled || ev == KEY_NONE) return;
+
+    if (s_resActive)                        // 结果页: 任意键退出
+    {
+        s_resActive = false;
+        if (ev != KEY_LEFT && ev != KEY_RIGHT)
+        {
+            s_clsStage = 0;                 // UP/DOWN/OK: 回教室页第 1 步菜单
+            drawAll(flickerSnapshot());
+            return;
+        }
+        // LEFT/RIGHT: 保留原切页意图, 继续走下方分支
+    }
 
     switch (ev)
     {
@@ -390,7 +502,14 @@ void oledHandleKey(uint8_t ev)
                 if (nx)
                     classroomInspectStartPoint(nx, DUR_WINDOWS[s_durSel], 0);  // epoch 0 → 完成时回落 NTP 校时
                 else
-                    classroomInspectFinish();
+                {
+                    uint16_t rid = classroomInspectTaskId();   // finish 内部置 inspCur=-1, 先记任务号
+                    if (classroomInspectFinish())
+                    {
+                        s_resTaskId = rid;
+                        s_resActive = true;    // 本次按键末尾 drawAll 立即绘制结果页
+                    }
+                }
             }
             else if (s_clsStage < 2)
             {
